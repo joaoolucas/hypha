@@ -55,3 +55,5 @@ def test_missing_pillars_are_skipped_not_zeroed():
     present = [p for p in sc.pillars if p.score is not None]
     assert {p.key for p in present} == {"distribution", "dev_authority"}
     assert sc.score > 0
+    # unknown liquidity must NOT trip the honeypot poison flag
+    assert sc.poison_flags == []

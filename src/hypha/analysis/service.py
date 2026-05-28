@@ -1,6 +1,10 @@
 """Analysis orchestrator — fan out to connectors, run each feature, assemble a TokenReport
 and cache it. Called by both the bot (inline) and the arq workers (heavy jobs).
-See SPEC.md §3.
+
+The default DEX read goes through GeckoTerminal (liquidity + venues in one light call). When
+all DEX sources error, `dex` is left None (liquidity *unknown*) so the score engine neither
+rewards nor poison-caps it — only a genuinely pool-less token trips the honeypot flag.
+See SPEC.md §3 / §5.3.
 """
 
 from __future__ import annotations
@@ -12,12 +16,10 @@ import structlog
 
 from ..cache import cache_get, cache_set
 from ..config import get_settings
-from ..connectors.dedust import DeDust
 from ..connectors.geckoterminal import GeckoTerminal
-from ..connectors.stonfi import StonFi
 from ..connectors.tonapi import TonAPI
 from ..models import TokenInfo, TokenReport
-from .dex import analyze_dex
+from .dex import analyze_dex, extract_venues, pool_liquidity
 from .holders import analyze_holders
 from .launchpad import detect_launchpad
 from .score import compute_score
@@ -38,23 +40,18 @@ async def analyze_token(address: str, *, force: bool = False) -> TokenReport:
         if cached:
             return TokenReport.model_validate(cached)
 
-    tonapi, gecko, stonfi, dedust = TonAPI(), GeckoTerminal(), StonFi(), DeDust()
+    tonapi, gecko = TonAPI(), GeckoTerminal()
     try:
-        info_r, holders_r, market_r, stonfi_r, dedust_r = await asyncio.gather(
+        info_r, holders_r, market_r, pools_r = await asyncio.gather(
             tonapi.jetton_info(address),
             tonapi.jetton_holders(address),
             gecko.token_market(address),
-            stonfi.pools_for_asset(address),
-            dedust.pools_for_asset(address),
+            gecko.token_pools(address),
             return_exceptions=True,
         )
     finally:
-        await asyncio.gather(
-            tonapi.aclose(), gecko.aclose(), stonfi.aclose(), dedust.aclose(),
-            return_exceptions=True,
-        )
+        await asyncio.gather(tonapi.aclose(), gecko.aclose(), return_exceptions=True)
 
-    errors: list[str] = []
     if isinstance(info_r, BaseException):
         log.warning("jetton_info_failed", address=address, error=str(info_r))
         return TokenReport(
@@ -64,20 +61,27 @@ async def analyze_token(address: str, *, force: bool = False) -> TokenReport:
         )
 
     info: TokenInfo = info_r
-    holders_raw = _val(holders_r, [])
-    market = _val(market_r, {})
-    stonfi_pools = _val(stonfi_r, [])
-    dedust_pools = _val(dedust_r, [])
-    for label, res in (("holders", holders_r), ("market", market_r),
-                       ("stonfi", stonfi_r), ("dedust", dedust_r)):
-        if isinstance(res, BaseException):
-            errors.append(f"{label} unavailable")
+    errors: list[str] = []
 
-    has_pool = bool(stonfi_pools or dedust_pools) or (market.get("liquidity_usd") or 0) > 0
-    liquidity = market.get("liquidity_usd") or 0.0
+    holders_raw = _val(holders_r, [])
+    if isinstance(holders_r, BaseException):
+        errors.append("holders unavailable")
+
+    market_ok = not isinstance(market_r, BaseException)
+    pools_ok = not isinstance(pools_r, BaseException)
+    market = market_r if market_ok else {}
+    gecko_pools = pools_r if pools_ok else []
+    dex_known = market_ok or pools_ok
+
+    if dex_known:
+        liquidity = (market.get("liquidity_usd") if market_ok else None) or pool_liquidity(gecko_pools)
+        has_pool = bool(extract_venues(gecko_pools)) or liquidity > 0
+    else:
+        liquidity, has_pool = 0.0, False
+        errors.append("dex data unavailable")
 
     launchpad = detect_launchpad(info, has_pool, liquidity)
-    dex = analyze_dex(info, market, stonfi_pools, dedust_pools, launchpad)
+    dex = analyze_dex(info, market, gecko_pools, launchpad) if dex_known else None
     holders = analyze_holders(info, holders_raw) if holders_raw else None
     bundle = None  # Phase 3 — pillar treated as unavailable by the score engine
 

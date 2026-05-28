@@ -1,9 +1,12 @@
 """Feature 4 — DEX / liquidity verification.
 
-Combines GeckoTerminal market data (liquidity, mcap, price, volume) with STON.fi / DeDust
-pool presence. LP lock/burn status is conservative by default: an unverified pool is treated
-as `unlocked` (low score) rather than assumed safe; known graduation flows that burn LP
-(e.g. GasPump → DeDust) are upgraded to `burned`. See SPEC.md Feature 4 / §5.
+Default path reads liquidity + venues from GeckoTerminal (one light call gives reserves and
+per-pool DEX id), rather than downloading entire DEX pool lists. STON.fi / DeDust connectors
+are reserved for the Phase-2 LP-lock check.
+
+LP lock/burn status is conservative: an unverified pool is treated as `unlocked` (low score)
+rather than assumed safe; known graduation flows that burn LP (GasPump → DeDust) are upgraded
+to `burned`. See SPEC.md Feature 4 / §5.
 """
 
 from __future__ import annotations
@@ -11,25 +14,48 @@ from __future__ import annotations
 from ..models import DexReport, LaunchpadReport, LaunchStatus, LockStatus, TokenInfo
 
 
+def _norm_venue(dex_id: str) -> str:
+    low = (dex_id or "").lower()
+    if "ston" in low:
+        return "stonfi"
+    if "dedust" in low:
+        return "dedust"
+    return low or "dex"
+
+
+def extract_venues(gecko_pools: list[dict]) -> list[str]:
+    venues: list[str] = []
+    for p in gecko_pools:
+        dex_id = (((p.get("relationships") or {}).get("dex") or {}).get("data") or {}).get("id", "")
+        v = _norm_venue(dex_id)
+        if v not in venues:
+            venues.append(v)
+    return venues
+
+
+def pool_liquidity(gecko_pools: list[dict]) -> float:
+    total = 0.0
+    for p in gecko_pools:
+        try:
+            total += float((p.get("attributes") or {}).get("reserve_in_usd") or 0)
+        except (TypeError, ValueError):
+            continue
+    return total
+
+
 def analyze_dex(
     info: TokenInfo,
     market: dict,
-    stonfi_pools: list[dict],
-    dedust_pools: list[dict],
+    gecko_pools: list[dict],
     launchpad: LaunchpadReport | None = None,
 ) -> DexReport:
-    venues: list[str] = []
-    if stonfi_pools:
-        venues.append("stonfi")
-    if dedust_pools:
-        venues.append("dedust")
-
-    liquidity = market.get("liquidity_usd") or 0.0
+    venues = extract_venues(gecko_pools)
+    # Prefer the token-level aggregate; fall back to summing pool reserves.
+    liquidity = market.get("liquidity_usd") or pool_liquidity(gecko_pools)
     mcap = market.get("market_cap_usd")
     has_pool = bool(venues) or liquidity > 0
 
     notes: list[str] = []
-    # Conservative LP status.
     if not has_pool:
         lp_status = LockStatus.NONE
     elif launchpad and launchpad.status == LaunchStatus.GRADUATED and launchpad.graduation_dex == "dedust":
@@ -50,6 +76,12 @@ def analyze_dex(
         volume24h_usd=market.get("volume24h_usd"),
         lp_status=lp_status,
         liq_to_mcap_pct=ratio,
-        pools=(stonfi_pools[:3] + dedust_pools[:3]),
+        pools=[
+            {
+                "name": (p.get("attributes") or {}).get("name", ""),
+                "reserve_usd": (p.get("attributes") or {}).get("reserve_in_usd"),
+            }
+            for p in gecko_pools[:5]
+        ],
         notes=notes,
     )
