@@ -71,6 +71,21 @@ async def test_self_token_excluded_and_wallets_ranked(portfolio_data):
     assert pf.wallets[0].top_bags[0]["whale"] is True
 
 
+async def test_dust_airdrops_filtered_from_shared_bags():
+    # DUST is held by 2 wallets but worth ~nothing and no whale -> must be dropped.
+    # (regression: forces evaluation of the `total_usd >= dust_usd` branch.)
+    by_owner = {
+        "A": [_bag("DUST", "0:dust", 10), _bag("DOGS", "0:dogs", 30_000)],
+        "B": [_bag("DUST", "0:dust", 10), _bag("DOGS", "0:dogs", 20_000)],
+    }
+    holders = [Holder(owner="A", balance=1), Holder(owner="B", balance=1)]
+    pf = await analyze_portfolios(
+        SELF_RAW, "SELF", holders, FakeTonAPI(by_owner),
+        max_wallets=10, whale_usd=10_000, min_shared=2, top_shared=8, dust_usd=1_000,
+    )
+    assert [t.symbol for t in pf.shared_tokens] == ["DOGS"]   # DUST filtered out
+
+
 async def test_excluded_holders_are_skipped():
     holders = [Holder(owner="P", balance=1, is_excluded=True)]
     pf = await analyze_portfolios(

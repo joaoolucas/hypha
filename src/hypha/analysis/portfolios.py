@@ -39,14 +39,20 @@ async def analyze_portfolios(
     whale_usd: float,
     min_shared: int,
     top_shared: int,
+    dust_usd: float = 1_000.0,
+    concurrency: int = 6,
 ) -> PortfolioReport:
     scan = [h for h in top_holders[:max_wallets] if h.owner and not h.is_excluded]
     if not scan:
         return PortfolioReport(notes=["no eligible top holders to scan"], whale_usd=whale_usd)
 
-    results = await asyncio.gather(
-        *(tonapi.account_jettons(h.owner) for h in scan), return_exceptions=True
-    )
+    sem = asyncio.Semaphore(max(1, concurrency))
+
+    async def _fetch(h: Holder) -> list[dict]:
+        async with sem:           # cap concurrent portfolio calls to avoid 429s
+            return await tonapi.account_jettons(h.owner)
+
+    results = await asyncio.gather(*(_fetch(h) for h in scan), return_exceptions=True)
 
     self_sym = (self_symbol or "").upper()
     agg: dict[str, dict] = {}
