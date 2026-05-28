@@ -1,0 +1,38 @@
+[project]
+name = "hypha"
+version = "0.1.0"
+description = "Hypha 🍄 — TON Jetton health & risk Telegram bot"
+requires-python = ">=3.11"
+dependencies = [
+    "aiogram>=3.13",
+    "httpx>=0.27",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "redis>=5.0",
+    "arq>=0.26",
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncpg>=0.29",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "tenacity>=8.4",
+    "structlog>=24.1",
+    "networkx>=3.3",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.5", "respx>=0.21"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,0 +1,40 @@
+services:
+  bot:
+    build: .
+    command: python -m hypha.bot.main
+    env_file: .env
+    depends_on: [redis, postgres]
+    restart: unless-stopped
+
+  worker:
+    build: .
+    command: arq hypha.workers.settings.WorkerSettings
+    env_file: .env
+    depends_on: [redis, postgres]
+    restart: unless-stopped
+
+  web:
+    build: .
+    command: uvicorn hypha.web.redirect:app --host 0.0.0.0 --port 8080
+    env_file: .env
+    ports: ["8080:8080"]
+    depends_on: [postgres]
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes: [redis-data:/data]
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: hypha
+      POSTGRES_PASSWORD: hypha
+      POSTGRES_DB: hypha
+    restart: unless-stopped
+    volumes: [pg-data:/var/lib/postgresql/data]
+
+volumes:
+  redis-data:
+  pg-data:
