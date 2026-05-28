@@ -16,12 +16,14 @@ INTRO = (
     "• <code>/analyze &lt;address&gt;</code> — full report\n"
     "• <code>/score &lt;address&gt;</code> — just the score card\n"
     "• <code>/holders &lt;address&gt;</code> — holder breakdown\n"
+    "• <code>/whales &lt;address&gt;</code> — what the top holders also own 🐋\n"
     "• <code>/dex &lt;address&gt;</code> — liquidity &amp; LP check\n\n"
     "<i>Hypha is a heuristic risk aid, not financial advice.</i>"
 )
 
 HELP = INTRO
 SPROUTING = "🍄 <i>sprouting analysis… reading the mycelium</i>"
+SCANNING = "🐋 <i>scanning the top wallets' portfolios…</i>"
 BAD_ADDRESS = "🍄 That doesn't look like a TON address. Paste an <code>EQ…</code> / <code>UQ…</code> jetton address."
 RATE_LIMITED = "🍄 Easy, sporeling — too many requests. Try again in a minute."
 
@@ -118,6 +120,40 @@ def render_holders(report: TokenReport) -> str:
         tag = f" <i>{_esc(hol.label)}</i>" if hol.label else ""
         bal = hol.balance / (10 ** report.token.decimals)
         lines.append(f"{i}. <code>{_esc(hol.owner[:6])}…{_esc(hol.owner[-4:])}</code> {fmt_int(bal)}{tag}")
+    return "\n".join(lines)
+
+
+def render_whales(report: TokenReport, pf) -> str:
+    sym = _esc(report.token.symbol or "?")
+    if not pf or (not pf.shared_tokens and not pf.wallets):
+        note = _esc(pf.notes[0]) if pf and pf.notes else "no portfolio data"
+        return f"🐋 <b>Top Wallets — ${sym}</b>\n{note}."
+
+    lines = [
+        f"🐋 <b>Top Wallets — ${sym}</b>",
+        f"<i>scanned {pf.scanned} top holders' portfolios</i>",
+    ]
+
+    if pf.shared_tokens:
+        lines += ["", "<b>Shared bags</b> — held by multiple top wallets:"]
+        for t in pf.shared_tokens:
+            tick = "☑️" if t.verified else ""
+            whales = f" · {t.whales}🐋" if t.whales else ""
+            lines.append(f"• ${_esc(t.symbol)}{tick} — {t.held_by} wallets · {fmt_usd(t.total_usd)}{whales}")
+
+    if pf.wallets:
+        lines += ["", "<b>Notable wallets</b>:"]
+        for i, w in enumerate(pf.wallets[:6], 1):
+            bags = ", ".join(
+                f"${_esc(b['symbol'])}{'🐋' if b['whale'] else ''}"
+                for b in w.top_bags if b.get("symbol")
+            )
+            short = f"{_esc(w.owner[:6])}…{_esc(w.owner[-4:])}"
+            lines.append(f"{i}. <code>{short}</code> · {fmt_usd(w.portfolio_usd)} · {w.token_count} tokens")
+            if bags:
+                lines.append(f"    holds {bags}")
+
+    lines.append(f"\n<i>🐋 = a single bag worth ≥ {fmt_usd(pf.whale_usd)}. Not financial advice.</i>")
     return "\n".join(lines)
 
 

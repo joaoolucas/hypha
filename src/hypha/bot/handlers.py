@@ -9,7 +9,7 @@ from aiogram import F, Router
 from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import CallbackQuery, Message
 
-from ..analysis.service import analyze_token
+from ..analysis.service import analyze_token, analyze_whales
 from ..cache import rate_limit_ok
 from ..utils import clean_address
 from . import ui
@@ -44,6 +44,22 @@ async def _run(message: Message, raw: str | None, renderer, *, with_kb: bool, fo
         await placeholder.edit_text(f"🍄 Something rotted in the mycelium: <code>{exc}</code>")
 
 
+async def _run_whales(message: Message, raw: str | None, *, force: bool = False):
+    address = clean_address(raw or "")
+    if not address:
+        await message.answer(ui.BAD_ADDRESS)
+        return
+    if not await _guard(message):
+        return
+    placeholder = await message.answer(ui.SCANNING)
+    try:
+        report, portfolio = await analyze_whales(address, force=force)
+        await placeholder.edit_text(ui.render_whales(report, portfolio), disable_web_page_preview=True)
+    except Exception as exc:  # noqa: BLE001
+        log.exception("whales_failed", address=address)
+        await placeholder.edit_text(f"🐋 Couldn't scan the top wallets: <code>{exc}</code>")
+
+
 # ── commands ──────────────────────────────────────────────────────────────────
 @router.message(CommandStart())
 @router.message(Command("help"))
@@ -56,9 +72,14 @@ async def cmd_analyze(message: Message, command: CommandObject) -> None:
     await _run(message, command.args, ui.render_report, with_kb=True)
 
 
-@router.message(Command("holders", "whales"))
+@router.message(Command("holders"))
 async def cmd_holders(message: Message, command: CommandObject) -> None:
     await _run(message, command.args, ui.render_holders, with_kb=False)
+
+
+@router.message(Command("whales", "portfolio"))
+async def cmd_whales(message: Message, command: CommandObject) -> None:
+    await _run_whales(message, command.args)
 
 
 @router.message(Command("dex"))
@@ -90,4 +111,20 @@ async def on_callback(cb: CallbackQuery) -> None:
         await cb.message.edit_text(renderer(report), reply_markup=kb, disable_web_page_preview=True)
     except Exception as exc:  # noqa: BLE001
         log.exception("callback_failed", data=cb.data)
+        await cb.answer(f"failed: {exc}", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("whales:"))
+async def on_whales_callback(cb: CallbackQuery) -> None:
+    address = cb.data.split(":", 1)[1]
+    await cb.answer("🐋 scanning top wallets…")
+    try:
+        report, portfolio = await analyze_whales(address)
+        await cb.message.edit_text(
+            ui.render_whales(report, portfolio),
+            reply_markup=cb.message.reply_markup,
+            disable_web_page_preview=True,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.exception("whales_callback_failed", data=cb.data)
         await cb.answer(f"failed: {exc}", show_alert=True)

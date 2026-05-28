@@ -17,8 +17,11 @@ def report_keyboard(report: TokenReport) -> InlineKeyboardMarkup | None:
         rows.append([InlineKeyboardButton(text=buy["label"], url=buy["url"])])
 
     rows.append([
-        InlineKeyboardButton(text="🔁 Refresh", callback_data=f"refresh:{addr}"),
         InlineKeyboardButton(text="🔬 Holders", callback_data=f"holders:{addr}"),
+        InlineKeyboardButton(text="🐋 Whales", callback_data=f"whales:{addr}"),
+    ])
+    rows.append([
         InlineKeyboardButton(text="💧 DEX", callback_data=f"dex:{addr}"),
+        InlineKeyboardButton(text="🔁 Refresh", callback_data=f"refresh:{addr}"),
     ])
     return InlineKeyboardMarkup(inline_keyboard=rows)

@@ -75,6 +75,6 @@ def analyze_holders(info: TokenInfo, holders: list[Holder]) -> HolderReport:
         dev_pct=dev_pct,
         gini=gini,
         excluded_pct=round(excluded_balance / max(info.total_supply, 1) * 100, 2),
-        top_holders=real[:10],
+        top_holders=real[:20],   # store up to 20 so /whales can scan beyond the displayed 10
         notes=notes,
     )

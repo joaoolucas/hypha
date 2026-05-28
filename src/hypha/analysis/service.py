@@ -18,10 +18,11 @@ from ..cache import cache_get, cache_set
 from ..config import get_settings
 from ..connectors.geckoterminal import GeckoTerminal
 from ..connectors.tonapi import TonAPI
-from ..models import TokenInfo, TokenReport
+from ..models import PortfolioReport, TokenInfo, TokenReport
 from .dex import analyze_dex, extract_venues, pool_liquidity
 from .holders import analyze_holders
 from .launchpad import detect_launchpad
+from .portfolios import analyze_portfolios
 from .score import compute_score
 
 log = structlog.get_logger(__name__)
@@ -99,3 +100,38 @@ async def analyze_token(address: str, *, force: bool = False) -> TokenReport:
     )
     await cache_set(cache_key, report.model_dump(), s.analysis_ttl)
     return report
+
+
+async def analyze_whales(address: str, *, force: bool = False) -> tuple[TokenReport, PortfolioReport]:
+    """Feature 3: scan the top holders' portfolios. Returns (token report, portfolio report)."""
+    s = get_settings()
+    report = await analyze_token(address, force=force)
+    if not report.holders or not report.holders.top_holders:
+        return report, PortfolioReport(notes=["no holder data to scan"], whale_usd=s.whale_usd_threshold)
+
+    cache_key = f"whales:{address}"
+    if not force:
+        cached = await cache_get(cache_key)
+        if cached:
+            return report, PortfolioReport.model_validate(cached)
+
+    tonapi = TonAPI()
+    try:
+        self_raw = await tonapi.parse_address(address)
+        portfolio = await analyze_portfolios(
+            self_raw,
+            report.token.symbol,
+            report.holders.top_holders,
+            tonapi,
+            max_wallets=s.whales_scan_max,
+            whale_usd=s.whale_usd_threshold,
+            min_shared=s.whales_min_shared,
+            top_shared=s.whales_top_shared,
+            dust_usd=s.whales_dust_usd,
+            concurrency=s.whales_concurrency,
+        )
+    finally:
+        await tonapi.aclose()
+
+    await cache_set(cache_key, portfolio.model_dump(), s.analysis_ttl)
+    return report, portfolio

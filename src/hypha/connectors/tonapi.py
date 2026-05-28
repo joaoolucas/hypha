@@ -73,12 +73,22 @@ class TonAPI(BaseConnector):
         return out
 
     async def account_jettons(self, addr: str) -> list[dict]:
+        """An account's jetton balances, with USD prices (for whale/portfolio valuation)."""
         d = await self.get(
             f"/v2/accounts/{addr}/jettons",
+            params={"currencies": "usd"},
             cache_key=f"ta:acct_jettons:{addr}",
             ttl=300,
         )
         return d.get("balances", []) or []
+
+    async def parse_address(self, addr: str) -> str:
+        """Normalize any TON address to its raw `0:hex` form (for cross-format matching)."""
+        try:
+            d = await self.get(f"/v2/address/{addr}/parse", cache_key=f"ta:parse:{addr}", ttl=86400)
+            return d.get("raw_form", addr)
+        except Exception:  # noqa: BLE001 — fall back to the input form
+            return addr
 
     async def account_events(self, addr: str, limit: int = 100) -> list[dict]:
         d = await self.get(

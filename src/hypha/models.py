@@ -106,8 +106,31 @@ class BundleReport(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class TokenHolding(BaseModel):
+    """A token held in common across the scanned top wallets."""
+
+    address: str
+    symbol: str = ""
+    name: str = ""
+    held_by: int = 0           # how many scanned top wallets hold it
+    whales: int = 0            # how many hold it as a whale position
+    total_usd: float = 0.0     # combined USD across those wallets
+    verified: bool = False
+
+
+class WhaleWallet(BaseModel):
+    owner: str
+    label: str | None = None
+    portfolio_usd: float = 0.0
+    token_count: int = 0
+    top_bags: list[dict] = Field(default_factory=list)   # [{symbol, usd, whale}]
+
+
 class PortfolioReport(BaseModel):
-    common_tokens: list[dict] = Field(default_factory=list)  # {symbol, holders, address}
+    scanned: int = 0
+    shared_tokens: list[TokenHolding] = Field(default_factory=list)
+    wallets: list[WhaleWallet] = Field(default_factory=list)
+    whale_usd: float = 0.0     # the USD threshold used to flag a bag as 🐋
     notes: list[str] = Field(default_factory=list)
 
 

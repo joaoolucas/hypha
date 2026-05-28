@@ -113,6 +113,14 @@ class Settings(BaseSettings):
     user_rate_per_min: int = 8
     sentry_dsn: str = ""
 
+    # Top-wallet holdings (Feature 3) — fan-out is gated, so keep these bounded.
+    whales_scan_max: int = 15          # how many top holders to scan
+    whale_usd_threshold: float = 25_000.0   # a single bag worth >= this == a "whale" position
+    whales_top_shared: int = 8         # shared bags to surface
+    whales_min_shared: int = 2         # token must be held by >= this many to count as "shared"
+    whales_dust_usd: float = 1_000.0   # drop near-worthless shared bags (spam airdrops) below this
+    whales_concurrency: int = 6        # cap concurrent portfolio calls to avoid 429s
+
     score: ScoreConfig = Field(default_factory=ScoreConfig)
 
 
