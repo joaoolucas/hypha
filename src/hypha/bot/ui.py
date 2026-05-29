@@ -10,7 +10,7 @@ from __future__ import annotations
 import html
 from urllib.parse import quote
 
-from ..models import LockStatus, TokenReport
+from ..models import TokenReport
 from ..utils import fmt_int, fmt_price, fmt_usd
 
 INTRO = (
@@ -28,48 +28,44 @@ SCANNING = "🐋 <i>scanning the top wallets' portfolios…</i>"
 BAD_ADDRESS = "🍄 That doesn't look like a TON address. Paste an <code>EQ…</code> / <code>UQ…</code> jetton address."
 RATE_LIMITED = "🍄 Easy, sporeling — too many requests. Try again in a minute."
 
-# LP status as shown on the card. UNLOCKED currently only means "not verified" (Phase 2 will
-# do real lock detection), so we label it honestly rather than asserting "unlocked".
-_LP_DISPLAY = {
-    LockStatus.BURNED: "🔥 LP burned",
-    LockStatus.LOCKED: "🔒 LP locked",
-    LockStatus.PARTIAL: "🧩 LP partial",
-    LockStatus.UNLOCKED: "🔓 LP unverified",
-    LockStatus.NONE: "🚫 no LP",
-}
-
-
 def _esc(s: str | None) -> str:
     return html.escape(s or "")
 
 
-def _dot(score: float | None) -> str:
-    if score is None:
-        return "⚪"
-    if score >= 70:
-        return "🟢"
-    if score >= 40:
-        return "🟡"
-    return "🔴"
+def _pct(pct: float | None) -> str:
+    if pct is None:
+        return "—"
+    return f"{pct:+.0f}%" if abs(pct) >= 10 else f"{pct:+.1f}%"
 
 
-def _change(pct: float | None) -> str:
+def _hero_change(pct: float | None) -> str:
     if pct is None:
         return ""
-    arrow = "🔼" if pct >= 0 else "🔽"
-    return f" {arrow} {pct:+.1f}%"
+    return f"📈 <b>{_pct(pct)}</b>" if pct >= 0 else f"📉 <b>{_pct(pct)}</b>"
+
+
+def _dev_status(t, h) -> str:
+    if t.mintable:
+        return "⚠️ mintable"
+    if not t.admin_address:
+        return "renounced 👑"
+    if h and h.dev_sold:
+        return "sold ⚠️"
+    pct = f" {h.dev_pct}%" if h and h.dev_pct else ""
+    return f"holding{pct}"
+
+
+def _growth(h) -> str:
+    parts = []
+    if h.growth_1h is not None:
+        parts.append(f"{h.growth_1h:+d} 1h")
+    if h.growth_24h is not None:
+        parts.append(f"{h.growth_24h:+d} 24h")
+    return f"  ·  📈 {' · '.join(parts)}" if parts else ""
 
 
 def _short(addr: str) -> str:
     return f"{_esc(addr[:6])}…{_esc(addr[-4:])}"
-
-
-def _authority(t) -> str:
-    if t.mintable:
-        return "⚠️ mintable"
-    if t.admin_address:
-        return "🔑 admin active"
-    return "👑 renounced ✅"
 
 
 def viewer_links(addr: str) -> str:
@@ -90,56 +86,45 @@ def _verification_mark(t) -> str:
 
 
 def render_report(report: TokenReport) -> str:
-    if report.errors and not report.score:
-        return f"🍄 {_esc(report.errors[0])}"
+    if not report.holders and not report.dex:
+        msg = report.errors[0] if report.errors else "couldn't analyze this token"
+        return f"🍄 {_esc(msg)}"
 
-    t, h, d, lp, sc = report.token, report.holders, report.dex, report.launchpad, report.score
+    t, h, d, lp = report.token, report.holders, report.dex, report.launchpad
     L: list[str] = []
 
-    # ── header ──
+    # ── header: name + hero price/change (what the eye should hit first) ──
     name = f" · {_esc(t.name)}" if t.name else ""
     L.append(f"🍄 <b>${_esc(t.symbol or '?')}</b>{_verification_mark(t)}{name}")
-    if sc:
-        L.append(f"{sc.badge} <b>{_esc(sc.tier)}</b> · {sc.score}/100 · confidence {sc.confidence}")
-
-    # ── CA + viewer links ──
-    L += ["", f"<code>{_esc(t.address)}</code>", viewer_links(t.address)]
-
-    # ── market block ──
-    L.append("")
     if d:
-        L.append(
-            f"💵 <b>{fmt_price(d.price_usd)}</b>{_change(d.price_change_24h)} · "
-            f"📈 MC <b>{fmt_usd(d.market_cap_usd)}</b> · 💧 Liq <b>{fmt_usd(d.liquidity_usd)}</b>"
-        )
-        L.append(f"📊 Vol24h {fmt_usd(d.volume24h_usd)} · {_LP_DISPLAY.get(d.lp_status, '')} · {_authority(t)}")
+        L.append(f"💵 <b>{fmt_price(d.price_usd)}</b>   {_hero_change(d.price_change_24h)}".rstrip())
+        L.append(f"💰 MC <b>{fmt_usd(d.market_cap_usd)}</b> · 💧 Liq {fmt_usd(d.liquidity_usd)} · 📊 Vol {fmt_usd(d.volume24h_usd)}")
     else:
-        L.append("💵 <i>market data unavailable</i> · " + _authority(t))
+        L.append("<i>market data unavailable</i>")
 
-    # ── holder block ──
+    # ── momentum (memecoin gold) ──
+    if d and any(v is not None for v in (d.change_5m, d.change_1h, d.price_change_24h)):
+        L += ["", "🚀 <b>Momentum</b>",
+              f"5m {_pct(d.change_5m)} · 1h {_pct(d.change_1h)} · 24h {_pct(d.price_change_24h)}"]
+        if d.vol_trend:
+            L.append(f"Volume: {d.vol_trend}")
+
+    # ── holders + dev ──
     if h:
-        L.append(f"👥 {fmt_int(h.holders_count)} holders · 🔝 Top10 {h.top10_pct}% · 🛠 Dev {h.dev_pct}%")
+        L += ["", f"👥 <b>{fmt_int(h.holders_count)} holders</b>{_growth(h)}",
+              f"🔝 Top10 {h.top10_pct}% · 🧑‍💻 Dev {_dev_status(t, h)}"]
 
-    # ── launchpad / status ──
+    # ── status + identity ──
+    L.append("")
     if lp and lp.launchpad:
         grad = f" ({lp.graduation_dex})" if lp.graduation_dex else ""
         L.append(f"🚀 {_esc(lp.launchpad)} • {lp.status.value}{grad}")
-    elif lp:
+    elif lp and lp.status.value != "unknown":
         L.append(f"🚀 {lp.status.value}")
+    L.append(f"<code>{_esc(t.address)}</code>")
+    L.append(viewer_links(t.address))
 
-    # ── Hypha Score breakdown (colour dots, no code block) ──
-    if sc:
-        L += ["", "<b>Hypha Score</b>"]
-        for p in sc.pillars:
-            val = "n/a" if p.score is None else str(int(round(p.score)))
-            L.append(f"{_dot(p.score)} {p.label} — {val}")
-
-    # ── flags ──
-    if sc and sc.poison_flags:
-        L.append("")
-        L += [f"☠️ <b>{_esc(f)}</b>" for f in sc.poison_flags]
-
-    L += ["", "👇 <i>tap a button below · not financial advice</i>"]
+    L.append("\n👇 <i>tap a button below · not financial advice</i>")
     return "\n".join(L)
 
 
@@ -153,7 +138,8 @@ def render_holders(report: TokenReport) -> str:
         "",
         f"👥 {fmt_int(h.holders_count)} holders · counted {fmt_int(h.counted_holders)}",
         f"🔝 Top1 {h.top1_pct}% · Top10 {h.top10_pct}% · Top20 {h.top20_pct}%",
-        f"📐 Gini {h.gini} · 🛠 Dev {h.dev_pct}% · 🌊 pools/burn {h.excluded_pct}%",
+        f"📐 Gini {h.gini} · 🌊 pools/burn {h.excluded_pct}%",
+        f"🧑‍💻 Dev {_dev_status(report.token, h)}{_growth(h)}",
         "",
     ]
     for i, hol in enumerate(h.top_holders[:10], 1):
@@ -203,9 +189,10 @@ def render_dex(report: TokenReport) -> str:
         f"💧 <b>Liquidity — ${_esc(report.token.symbol)}</b>",
         f"<code>{_esc(report.token.address)}</code>",
         "",
-        f"💵 Price {fmt_price(d.price_usd)}{_change(d.price_change_24h)}",
+        f"💵 Price {fmt_price(d.price_usd)}  {_hero_change(d.price_change_24h)}".rstrip(),
+        f"5m {_pct(d.change_5m)} · 1h {_pct(d.change_1h)} · 24h {_pct(d.price_change_24h)}",
         f"📈 MC {fmt_usd(d.market_cap_usd)} · 💧 Liq {fmt_usd(d.liquidity_usd)} · 📊 Vol24h {fmt_usd(d.volume24h_usd)}",
-        f"{_LP_DISPLAY.get(d.lp_status, '')} · 🏦 {', '.join(d.venues) or 'no venue'}",
+        f"🏦 {', '.join(d.venues) or 'no venue'}" + (f" · Vol {d.vol_trend}" if d.vol_trend else ""),
     ]
     if d.liq_to_mcap_pct is not None:
         L.append(f"⚖️ Liq/MC {d.liq_to_mcap_pct}%")

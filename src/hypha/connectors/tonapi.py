@@ -82,6 +82,14 @@ class TonAPI(BaseConnector):
         )
         return d.get("balances", []) or []
 
+    async def jetton_account_history(self, account: str, jetton: str, limit: int = 30) -> list[dict]:
+        """An account's transfer history for one jetton (used to detect dev sells)."""
+        d = await self.get(
+            f"/v2/accounts/{account}/jettons/{jetton}/history",
+            params={"limit": min(limit, 100)},
+        )
+        return d.get("events", []) or []
+
     async def parse_address(self, addr: str) -> str:
         """Normalize any TON address to its raw `0:hex` form (for cross-format matching)."""
         try:

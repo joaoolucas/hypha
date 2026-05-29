@@ -45,8 +45,11 @@ class HolderReport(BaseModel):
     top20_pct: float = 0.0
     gini: float = 0.0
     dev_pct: float = 0.0               # admin/dev allocation %
+    dev_sold: bool | None = None       # admin/dev wallet has transferred tokens out
     top1_pct: float = 0.0
     excluded_pct: float = 0.0          # supply in pools/burn/lockers
+    growth_1h: int | None = None       # holder count delta vs ~1h ago (time-series)
+    growth_24h: int | None = None      # holder count delta vs ~24h ago
     top_holders: list[Holder] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
 
@@ -66,6 +69,9 @@ class DexReport(BaseModel):
     market_cap_usd: float | None = None
     price_usd: float | None = None
     price_change_24h: float | None = None
+    change_5m: float | None = None
+    change_1h: float | None = None
+    vol_trend: str | None = None        # "Rising 📈" | "Cooling 📉" | "Steady ➡️"
     volume24h_usd: float | None = None
     lp_status: LockStatus = LockStatus.NONE
     liq_to_mcap_pct: float | None = None

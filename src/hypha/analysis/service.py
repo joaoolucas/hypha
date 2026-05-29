@@ -19,6 +19,7 @@ from ..config import get_settings
 from ..connectors.geckoterminal import GeckoTerminal
 from ..connectors.tonapi import TonAPI
 from ..models import PortfolioReport, TokenInfo, TokenReport
+from ..snapshots import record_and_growth
 from .dex import analyze_dex, extract_venues, pool_liquidity
 from .holders import analyze_holders
 from .launchpad import detect_launchpad
@@ -33,6 +34,22 @@ def _val(res, default):
     return default if isinstance(res, BaseException) else res
 
 
+def _dev_sold(events: list, dev: str) -> bool | None:
+    """True if the dev/admin wallet has transferred this jetton out (sold/moved)."""
+    if not events:
+        return None
+    for ev in events:
+        for act in ev.get("actions", []):
+            if act.get("type") != "JettonTransfer":
+                continue
+            t = act.get("JettonTransfer") or {}
+            sender = (t.get("sender") or {}).get("address")
+            recipient = (t.get("recipient") or {}).get("address")
+            if sender == dev and recipient != dev:
+                return True
+    return False
+
+
 async def analyze_token(address: str, *, force: bool = False) -> TokenReport:
     s = get_settings()
     cache_key = f"report:{address}"
@@ -42,6 +59,7 @@ async def analyze_token(address: str, *, force: bool = False) -> TokenReport:
             return TokenReport.model_validate(cached)
 
     tonapi, gecko = TonAPI(), GeckoTerminal()
+    dev_events: list = []
     try:
         info_r, holders_r, market_r, pools_r = await asyncio.gather(
             tonapi.jetton_info(address),
@@ -50,6 +68,13 @@ async def analyze_token(address: str, *, force: bool = False) -> TokenReport:
             gecko.token_pools(address),
             return_exceptions=True,
         )
+        # Dev-sold needs the admin address (from info) + a still-open client.
+        if not isinstance(info_r, BaseException) and info_r.admin_address \
+                and not isinstance(holders_r, BaseException):
+            try:
+                dev_events = await tonapi.jetton_account_history(info_r.admin_address, address)
+            except Exception:  # noqa: BLE001
+                dev_events = []
     finally:
         await asyncio.gather(tonapi.aclose(), gecko.aclose(), return_exceptions=True)
 
@@ -84,6 +109,10 @@ async def analyze_token(address: str, *, force: bool = False) -> TokenReport:
     launchpad = detect_launchpad(info, has_pool, liquidity)
     dex = analyze_dex(info, market, gecko_pools, launchpad) if dex_known else None
     holders = analyze_holders(info, holders_raw) if holders_raw else None
+    if holders:
+        if info.admin_address:
+            holders.dev_sold = _dev_sold(dev_events, info.admin_address)
+        holders.growth_1h, holders.growth_24h = await record_and_growth(address, holders.holders_count)
     bundle = None  # Phase 3 — pillar treated as unavailable by the score engine
 
     score = compute_score(info, holders, dex, launchpad, bundle)
