@@ -82,19 +82,3 @@ async def on_report(cb: CallbackQuery) -> None:
     except Exception as exc:  # noqa: BLE001
         log.exception("report_callback_failed", data=cb.data)
         await cb.answer(f"failed: {exc}", show_alert=True)
-
-
-@router.callback_query(F.data.startswith("whales:"))
-async def on_whales(cb: CallbackQuery) -> None:
-    address = cb.data.split(":", 1)[1]
-    await cb.answer("🐋 reading the whales…")
-    try:
-        report, pf = await analyze_whales(address)
-        await cb.message.edit_text(
-            ui.render_whales(report, pf),
-            reply_markup=menu_keyboard(report, "whales"),
-            disable_web_page_preview=True,
-        )
-    except Exception as exc:  # noqa: BLE001
-        log.exception("whales_callback_failed", data=cb.data)
-        await cb.answer(f"failed: {exc}", show_alert=True)

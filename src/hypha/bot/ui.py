@@ -79,34 +79,29 @@ def _verification_mark(t) -> str:
 
 
 def _smart_money(pf) -> list[str]:
-    """The headline signal: how many top holders are whales + what they pile into."""
+    """Full top-wallet signal, inline on the card: headline whale count + median bag, the
+    tokens the top holders share, and the most notable wallets with their bags."""
     if not pf or not pf.scanned:
         return []
-    n, whales = pf.scanned, pf.whale_wallets
-    if whales == 0:
-        head = f"🐋 <b>Smart Money</b> — none of the top {n} are whales"
-    else:
-        head = f"🐋 <b>Smart Money</b> — {whales}/{n} top holders are whales"
-    L = ["", head]
-    # what they collectively pile into (proven big money's other bags).
-    # Prefer tokens multiple whales share; else fall back to the top whale bags overall so
-    # the detail always shows when whales exist.
-    shared = [t for t in pf.shared_tokens if t.whales > 0][:3]
-    if shared:
-        joined = " · ".join(f"${_esc(t.symbol)} ({t.whales}🐋)" for t in shared)
-        L.append(f"also holding: {joined}")
-    else:
-        bags = []
-        seen = set()
-        for w in pf.wallets:
-            for b in w.top_bags:
-                sym = b.get("symbol")
-                if b.get("whale") and sym and sym not in seen:
-                    seen.add(sym)
-                    bags.append(sym)
-        if bags:
-            joined = " · ".join(f"${_esc(s)}" for s in bags[:3])
-            L.append(f"also holding: {joined}")
+    L = [
+        "", "🐋 <b>Top Wallet Signal</b>",
+        f"{pf.whale_wallets}/{pf.scanned} whales · median bag {fmt_usd(pf.median_portfolio_usd)}",
+    ]
+
+    if pf.shared_tokens:
+        L += ["", "<b>Shared holdings</b>"]
+        for t in pf.shared_tokens[:6]:
+            tick = " ✅" if t.verified else ""
+            whales = f" · {t.whales} whale{'s' if t.whales != 1 else ''}" if t.whales else ""
+            L.append(f"${_esc(t.symbol)}{tick} — {t.held_by} wallets · {fmt_usd(t.total_usd)}{whales}")
+
+    if pf.wallets:
+        L += ["", "<b>Notable wallets</b>"]
+        for i, w in enumerate(pf.wallets[:3], 1):
+            bags = ", ".join(f"${_esc(b['symbol'])}" for b in w.top_bags if b.get("symbol"))
+            L.append(f"{i}. <code>{_short(w.owner)}</code> · {fmt_usd(w.portfolio_usd)} · {w.token_count} tokens")
+            if bags:
+                L.append(f"   holds {bags}")
     return L
 
 
@@ -146,36 +141,5 @@ def render_report(report: TokenReport, pf=None) -> str:
 
     # ── identity ──
     L += ["", f"<code>{_esc(t.address)}</code>", viewer_links(t.address)]
-    L.append("\n👇 <i>tap to dig into the whales · not financial advice</i>")
-    return "\n".join(L)
-
-
-def render_whales(report: TokenReport, pf) -> str:
-    """Drill-down: the full top-holder portfolio scan behind the card's Smart Money line."""
-    sym = _esc(report.token.symbol or "?")
-    if not pf or (not pf.shared_tokens and not pf.wallets):
-        note = _esc(pf.notes[0]) if pf and pf.notes else "no portfolio data"
-        return f"🐋 <b>Top Wallets — ${sym}</b>\n{note}."
-
-    L = [
-        f"🐋 <b>Top Wallets — ${sym}</b>",
-        f"<i>{pf.whale_wallets}/{pf.scanned} are whales · median bag {fmt_usd(pf.median_portfolio_usd)}</i>",
-    ]
-    if pf.shared_tokens:
-        L += ["", "<b>Shared bags</b> — held by multiple top wallets:"]
-        for t in pf.shared_tokens:
-            tick = " ✅" if t.verified else ""
-            whales = f" · {t.whales}🐋" if t.whales else ""
-            L.append(f"• ${_esc(t.symbol)}{tick} — {t.held_by} wallets · {fmt_usd(t.total_usd)}{whales}")
-    if pf.wallets:
-        L += ["", "<b>Notable wallets</b>:"]
-        for i, w in enumerate(pf.wallets[:6], 1):
-            bags = ", ".join(
-                f"${_esc(b['symbol'])}{'🐋' if b['whale'] else ''}"
-                for b in w.top_bags if b.get("symbol")
-            )
-            L.append(f"{i}. <code>{_short(w.owner)}</code> · {fmt_usd(w.portfolio_usd)} · {w.token_count} tokens")
-            if bags:
-                L.append(f"    holds {bags}")
-    L.append(f"\n<i>🐋 = a single bag worth ≥ {fmt_usd(pf.whale_usd)}. Not financial advice.</i>")
+    L.append("\n<i>not financial advice</i>")
     return "\n".join(L)
