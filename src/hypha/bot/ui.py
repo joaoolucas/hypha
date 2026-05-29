@@ -88,11 +88,25 @@ def _smart_money(pf) -> list[str]:
     else:
         head = f"🐋 <b>Smart Money</b> — {whales}/{n} top holders are whales"
     L = ["", head]
-    # what they collectively pile into (proven big money's other bags)
-    bags = [t for t in pf.shared_tokens if t.whales > 0][:3]
-    if bags:
-        joined = " · ".join(f"${_esc(t.symbol)} ({t.whales}🐋)" for t in bags)
+    # what they collectively pile into (proven big money's other bags).
+    # Prefer tokens multiple whales share; else fall back to the top whale bags overall so
+    # the detail always shows when whales exist.
+    shared = [t for t in pf.shared_tokens if t.whales > 0][:3]
+    if shared:
+        joined = " · ".join(f"${_esc(t.symbol)} ({t.whales}🐋)" for t in shared)
         L.append(f"also holding: {joined}")
+    else:
+        bags = []
+        seen = set()
+        for w in pf.wallets:
+            for b in w.top_bags:
+                sym = b.get("symbol")
+                if b.get("whale") and sym and sym not in seen:
+                    seen.add(sym)
+                    bags.append(sym)
+        if bags:
+            joined = " · ".join(f"${_esc(s)}" for s in bags[:3])
+            L.append(f"also holding: {joined}")
     return L
 
 

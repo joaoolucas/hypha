@@ -115,7 +115,7 @@ class Settings(BaseSettings):
 
     # Top-wallet holdings (Feature 3) — fan-out is gated, so keep these bounded.
     whales_scan_max: int = 10          # how many top holders to scan
-    whale_usd_threshold: float = 25_000.0   # a single bag worth >= this == a "whale" position
+    whale_usd_threshold: float = 5_000.0    # a single bag worth >= this == a "whale" position
     whales_top_shared: int = 8         # shared bags to surface
     whales_min_shared: int = 2         # token must be held by >= this many to count as "shared"
     whales_dust_usd: float = 1_000.0   # drop near-worthless shared bags (spam airdrops) below this
