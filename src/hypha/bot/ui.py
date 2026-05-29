@@ -70,6 +70,11 @@ def viewer_links(addr: str) -> str:
     )
 
 
+def _wallet_link(addr: str) -> str:
+    """Truncated address linking to that wallet's holdings tab on Tonviewer."""
+    return f'<a href="https://tonviewer.com/{quote(addr, safe="")}?section=tokens">{_short(addr)}</a>'
+
+
 def _verification_mark(t) -> str:
     if t.verification == "whitelist":
         return " ✅"
@@ -88,18 +93,11 @@ def _smart_money(pf) -> list[str]:
         f"{pf.whale_wallets}/{pf.scanned} whales · median bag {fmt_usd(pf.median_portfolio_usd)}",
     ]
 
-    if pf.shared_tokens:
-        L += ["", "<b>Shared holdings</b>"]
-        for t in pf.shared_tokens[:6]:
-            tick = " ✅" if t.verified else ""
-            whales = f" · {t.whales} whale{'s' if t.whales != 1 else ''}" if t.whales else ""
-            L.append(f"${_esc(t.symbol)}{tick} — {t.held_by} wallets · {fmt_usd(t.total_usd)}{whales}")
-
     if pf.wallets:
         L += ["", "<b>Notable wallets</b>"]
         for i, w in enumerate(pf.wallets[:3], 1):
             bags = ", ".join(f"${_esc(b['symbol'])}" for b in w.top_bags if b.get("symbol"))
-            L.append(f"{i}. <code>{_short(w.owner)}</code> · {fmt_usd(w.portfolio_usd)} · {w.token_count} tokens")
+            L.append(f"{i}. {_wallet_link(w.owner)} · {fmt_usd(w.portfolio_usd)} · {w.token_count} tokens")
             if bags:
                 L.append(f"   holds {bags}")
     return L
