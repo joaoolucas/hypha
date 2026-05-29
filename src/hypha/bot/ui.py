@@ -15,10 +15,8 @@ from ..utils import fmt_int, fmt_price, fmt_usd
 
 INTRO = (
     "🍄 <b>Hypha</b> — I sense the health of TON tokens through their mycelium.\n\n"
-    "<b>Just paste a token address (CA)</b> and I'll show everything — the <b>Hypha Score</b>, "
-    "holder spread, dev allocation, liquidity &amp; launchpad status — with a menu to dig into "
-    "holders, 🐋 whales and liquidity. No commands needed.\n\n"
-    "<i>Shortcuts (optional):</i> /analyze · /holders · /whales · /dex\n\n"
+    "<b>Just paste a token address (CA)</b> and I'll show it all in one card — price, "
+    "momentum, holder growth, and whether the top holders are 🐋 <b>whales</b>. No commands needed.\n\n"
     "<i>Hypha is a heuristic risk aid, not financial advice.</i>"
 )
 
@@ -44,24 +42,19 @@ def _hero_change(pct: float | None) -> str:
     return f"📈 <b>{_pct(pct)}</b>" if pct >= 0 else f"📉 <b>{_pct(pct)}</b>"
 
 
-def _dev_status(t, h) -> str:
-    if t.mintable:
-        return "⚠️ mintable"
-    if not t.admin_address:
-        return "renounced 👑"
-    if h and h.dev_sold:
-        return "sold ⚠️"
-    pct = f" {h.dev_pct}%" if h and h.dev_pct else ""
-    return f"holding{pct}"
+def _ago(secs: float) -> str:
+    if secs < 3600:
+        return f"{round(secs / 60)}m"
+    if secs < 86400:
+        return f"{round(secs / 3600)}h"
+    return f"{round(secs / 86400)}d"
 
 
 def _growth(h) -> str:
-    parts = []
-    if h.growth_1h is not None:
-        parts.append(f"{h.growth_1h:+d} 1h")
-    if h.growth_24h is not None:
-        parts.append(f"{h.growth_24h:+d} 24h")
-    return f"  ·  📈 {' · '.join(parts)}" if parts else ""
+    """Holder growth since the last snapshot, e.g. '· +12 in 7m'. Empty if no movement yet."""
+    if h.growth_delta is None or h.growth_secs is None or h.growth_delta == 0:
+        return ""
+    return f" · {h.growth_delta:+d} in {_ago(h.growth_secs)}"
 
 
 def _short(addr: str) -> str:
@@ -85,12 +78,32 @@ def _verification_mark(t) -> str:
     return ""
 
 
-def render_report(report: TokenReport) -> str:
+def _smart_money(pf) -> list[str]:
+    """The headline signal: how many top holders are whales + what they pile into."""
+    if not pf or not pf.scanned:
+        return []
+    n, whales = pf.scanned, pf.whale_wallets
+    if whales == 0:
+        head = f"🐋 <b>Smart Money</b> — none of the top {n} are whales"
+    else:
+        head = f"🐋 <b>Smart Money</b> — {whales}/{n} top holders are whales"
+    L = ["", head]
+    # what they collectively pile into (proven big money's other bags)
+    bags = [t for t in pf.shared_tokens if t.whales > 0][:3]
+    if bags:
+        joined = " · ".join(f"${_esc(t.symbol)} ({t.whales}🐋)" for t in bags)
+        L.append(f"also holding: {joined}")
+    return L
+
+
+def render_report(report: TokenReport, pf=None) -> str:
+    """The one card. Everything lives here: price, momentum, holders+growth, and the
+    smart-money read on the top holders. No sub-tabs."""
     if not report.holders and not report.dex:
         msg = report.errors[0] if report.errors else "couldn't analyze this token"
         return f"🍄 {_esc(msg)}"
 
-    t, h, d, lp = report.token, report.holders, report.dex, report.launchpad
+    t, h, d = report.token, report.holders, report.dex
     L: list[str] = []
 
     # ── header: name + hero price/change (what the eye should hit first) ──
@@ -109,49 +122,22 @@ def render_report(report: TokenReport) -> str:
         if d.vol_trend:
             L.append(f"Volume: {d.vol_trend}")
 
-    # ── holders + dev ──
+    # ── holders + growth ──
     if h:
         L += ["", f"👥 <b>{fmt_int(h.holders_count)} holders</b>{_growth(h)}",
-              f"🔝 Top10 {h.top10_pct}% · 🧑‍💻 Dev {_dev_status(t, h)}"]
+              f"🔝 Top10 {h.top10_pct}% · Top20 {h.top20_pct}%"]
 
-    # ── status + identity ──
-    L.append("")
-    if lp and lp.launchpad:
-        grad = f" ({lp.graduation_dex})" if lp.graduation_dex else ""
-        L.append(f"🚀 {_esc(lp.launchpad)} • {lp.status.value}{grad}")
-    elif lp and lp.status.value != "unknown":
-        L.append(f"🚀 {lp.status.value}")
-    L.append(f"<code>{_esc(t.address)}</code>")
-    L.append(viewer_links(t.address))
+    # ── smart money (the headline signal, inline) ──
+    L += _smart_money(pf)
 
-    L.append("\n👇 <i>tap a button below · not financial advice</i>")
-    return "\n".join(L)
-
-
-def render_holders(report: TokenReport) -> str:
-    h = report.holders
-    if not h:
-        return "🍄 No holder data available."
-    L = [
-        f"🔬 <b>Holders — ${_esc(report.token.symbol)}</b>",
-        f"<code>{_esc(report.token.address)}</code>",
-        "",
-        f"👥 {fmt_int(h.holders_count)} holders · counted {fmt_int(h.counted_holders)}",
-        f"🔝 Top1 {h.top1_pct}% · Top10 {h.top10_pct}% · Top20 {h.top20_pct}%",
-        f"📐 Gini {h.gini} · 🌊 pools/burn {h.excluded_pct}%",
-        f"🧑‍💻 Dev {_dev_status(report.token, h)}{_growth(h)}",
-        "",
-    ]
-    for i, hol in enumerate(h.top_holders[:10], 1):
-        tag = f" · <i>{_esc(hol.label)}</i>" if hol.label else ""
-        bal = hol.balance / (10 ** report.token.decimals)
-        L.append(f"{i}. <code>{_short(hol.owner)}</code> · {fmt_int(bal)}{tag}")
-    if h.notes:
-        L += ["", *(f"• <i>{_esc(n)}</i>" for n in h.notes[:3])]
+    # ── identity ──
+    L += ["", f"<code>{_esc(t.address)}</code>", viewer_links(t.address)]
+    L.append("\n👇 <i>tap to dig into the whales · not financial advice</i>")
     return "\n".join(L)
 
 
 def render_whales(report: TokenReport, pf) -> str:
+    """Drill-down: the full top-holder portfolio scan behind the card's Smart Money line."""
     sym = _esc(report.token.symbol or "?")
     if not pf or (not pf.shared_tokens and not pf.wallets):
         note = _esc(pf.notes[0]) if pf and pf.notes else "no portfolio data"
@@ -159,7 +145,7 @@ def render_whales(report: TokenReport, pf) -> str:
 
     L = [
         f"🐋 <b>Top Wallets — ${sym}</b>",
-        f"<i>scanned {pf.scanned} top holders' portfolios</i>",
+        f"<i>{pf.whale_wallets}/{pf.scanned} are whales · median bag {fmt_usd(pf.median_portfolio_usd)}</i>",
     ]
     if pf.shared_tokens:
         L += ["", "<b>Shared bags</b> — held by multiple top wallets:"]
@@ -178,24 +164,4 @@ def render_whales(report: TokenReport, pf) -> str:
             if bags:
                 L.append(f"    holds {bags}")
     L.append(f"\n<i>🐋 = a single bag worth ≥ {fmt_usd(pf.whale_usd)}. Not financial advice.</i>")
-    return "\n".join(L)
-
-
-def render_dex(report: TokenReport) -> str:
-    d = report.dex
-    if not d:
-        return "🍄 No liquidity data available."
-    L = [
-        f"💧 <b>Liquidity — ${_esc(report.token.symbol)}</b>",
-        f"<code>{_esc(report.token.address)}</code>",
-        "",
-        f"💵 Price {fmt_price(d.price_usd)}  {_hero_change(d.price_change_24h)}".rstrip(),
-        f"5m {_pct(d.change_5m)} · 1h {_pct(d.change_1h)} · 24h {_pct(d.price_change_24h)}",
-        f"📈 MC {fmt_usd(d.market_cap_usd)} · 💧 Liq {fmt_usd(d.liquidity_usd)} · 📊 Vol24h {fmt_usd(d.volume24h_usd)}",
-        f"🏦 {', '.join(d.venues) or 'no venue'}" + (f" · Vol {d.vol_trend}" if d.vol_trend else ""),
-    ]
-    if d.liq_to_mcap_pct is not None:
-        L.append(f"⚖️ Liq/MC {d.liq_to_mcap_pct}%")
-    if d.notes:
-        L += ["", *(f"• <i>{_esc(n)}</i>" for n in d.notes[:3])]
     return "\n".join(L)

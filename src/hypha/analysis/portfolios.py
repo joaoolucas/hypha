@@ -106,8 +106,16 @@ async def analyze_portfolios(
     shared.sort(key=lambda t: (t.whales, t.total_usd), reverse=True)
     wallets.sort(key=lambda w: w.portfolio_usd, reverse=True)
 
+    # Smart-money summary for the main card: a top holder counts as a "whale" if their
+    # overall portfolio clears the whale threshold (i.e. proven big money elsewhere).
+    whale_wallets = sum(1 for w in wallets if w.portfolio_usd >= whale_usd)
+    portfolios = sorted(w.portfolio_usd for w in wallets)
+    median = portfolios[len(portfolios) // 2] if portfolios else 0.0
+
     return PortfolioReport(
         scanned=len(scan),
+        whale_wallets=whale_wallets,
+        median_portfolio_usd=round(median, 2),
         shared_tokens=shared[:top_shared],
         wallets=wallets[:8],
         whale_usd=whale_usd,

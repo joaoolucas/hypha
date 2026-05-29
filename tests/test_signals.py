@@ -1,21 +1,32 @@
-"""Holder-growth time-series diffing + dev-sold detection."""
+"""Holder-growth snapshot diffing + dev-sold detection."""
+
+import time
 
 from hypha.analysis.service import _dev_sold
-from hypha.snapshots import _delta
+from hypha.cache import cache_set
+from hypha.snapshots import record_and_growth
 
 DEV = "0:dev"
 
 
-def test_delta_picks_nearest_in_window():
-    now = 1_000_000.0
-    snaps = [[now - 3600, 100], [now - 86400, 50], [now - 100, 199]]
-    assert _delta(snaps, now, 200, target=3600, lo=1800, hi=7200) == 100     # +100 in ~1h
-    assert _delta(snaps, now, 200, target=86400, lo=43200, hi=129600) == 150  # +150 in ~24h
+async def test_growth_diffs_against_prior_snapshot():
+    now = time.time()
+    await cache_set("snap:tokA", [[now - 600, 90]], 99999)   # 90 holders, 10 min ago
+    delta, secs = await record_and_growth("tokA", 102)
+    assert delta == 12
+    assert 590 <= secs <= 610
 
 
-def test_delta_none_when_no_snapshot_in_window():
-    now = 1_000_000.0
-    assert _delta([[now - 100, 199]], now, 200, target=3600, lo=1800, hi=7200) is None
+async def test_growth_none_until_a_prior_snapshot_exists():
+    delta, secs = await record_and_growth("tokFresh", 100)   # first ever sighting
+    assert delta is None and secs is None
+
+
+async def test_growth_ignores_too_recent_snapshots():
+    now = time.time()
+    await cache_set("snap:tokB", [[now - 5, 100]], 99999)    # younger than _MIN_GAP
+    delta, secs = await record_and_growth("tokB", 130)
+    assert delta is None and secs is None
 
 
 def _transfer(sender, recipient):

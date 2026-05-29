@@ -48,8 +48,8 @@ class HolderReport(BaseModel):
     dev_sold: bool | None = None       # admin/dev wallet has transferred tokens out
     top1_pct: float = 0.0
     excluded_pct: float = 0.0          # supply in pools/burn/lockers
-    growth_1h: int | None = None       # holder count delta vs ~1h ago (time-series)
-    growth_24h: int | None = None      # holder count delta vs ~24h ago
+    growth_delta: int | None = None    # holder count delta vs the most recent prior snapshot
+    growth_secs: float | None = None   # seconds since that snapshot
     top_holders: list[Holder] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
 
@@ -135,6 +135,8 @@ class WhaleWallet(BaseModel):
 
 class PortfolioReport(BaseModel):
     scanned: int = 0
+    whale_wallets: int = 0     # how many scanned top holders are whales (big multi-token bags)
+    median_portfolio_usd: float = 0.0
     shared_tokens: list[TokenHolding] = Field(default_factory=list)
     wallets: list[WhaleWallet] = Field(default_factory=list)
     whale_usd: float = 0.0     # the USD threshold used to flag a bag as 🐋

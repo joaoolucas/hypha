@@ -112,7 +112,9 @@ async def analyze_token(address: str, *, force: bool = False) -> TokenReport:
     if holders:
         if info.admin_address:
             holders.dev_sold = _dev_sold(dev_events, info.admin_address)
-        holders.growth_1h, holders.growth_24h = await record_and_growth(address, holders.holders_count)
+        holders.growth_delta, holders.growth_secs = await record_and_growth(
+            address, holders.holders_count
+        )
     bundle = None  # Phase 3 — pillar treated as unavailable by the score engine
 
     score = compute_score(info, holders, dex, launchpad, bundle)
