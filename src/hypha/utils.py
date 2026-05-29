@@ -33,6 +33,34 @@ def fmt_usd(v: float | None) -> str:
     return f"${v:,.0f}"
 
 
+_SUBSCRIPT = "₀₁₂₃₄₅₆₇₈₉"
+
+
+def _subscript(n: int) -> str:
+    return "".join(_SUBSCRIPT[int(d)] for d in str(n))
+
+
+def fmt_price(p: float | None) -> str:
+    """Compact USD price, with DexScreener-style subscript-zero notation for tiny values
+    (e.g. 0.000142 -> $0.0₂142)."""
+    if p is None:
+        return "—"
+    try:
+        p = float(p)
+    except (TypeError, ValueError):
+        return "—"
+    if p <= 0:
+        return "$0"
+    if p >= 1:
+        return f"${p:,.2f}"
+    if p >= 0.001:
+        return "$" + f"{p:.6f}".rstrip("0").rstrip(".")
+    decimals = f"{p:.18f}".split(".")[1]
+    zeros = len(decimals) - len(decimals.lstrip("0"))
+    sig = decimals[zeros:zeros + 4].rstrip("0") or "0"
+    return f"$0.0{_subscript(zeros - 1)}{sig}"
+
+
 def fmt_int(v: int | float | None) -> str:
     if v is None:
         return "—"

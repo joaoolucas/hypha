@@ -1,4 +1,14 @@
-from hypha.utils import bar, clean_address, fmt_usd, is_ton_address
+from hypha.utils import bar, clean_address, fmt_price, fmt_usd, is_ton_address
+
+
+def test_fmt_price():
+    assert fmt_price(None) == "—"
+    assert fmt_price(0) == "$0"
+    assert fmt_price(1.2345) == "$1.23"
+    assert fmt_price(0.0123) == "$0.0123"
+    # tiny price -> subscript-zero notation: 0.000142 == $0.0₂142
+    assert fmt_price(0.000142) == "$0.0₂142"
+    assert fmt_price(0.0000142) == "$0.0₃142"
 
 
 def test_clean_address_friendly():

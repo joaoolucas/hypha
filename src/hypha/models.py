@@ -65,6 +65,7 @@ class DexReport(BaseModel):
     liquidity_usd: float = 0.0
     market_cap_usd: float | None = None
     price_usd: float | None = None
+    price_change_24h: float | None = None
     volume24h_usd: float | None = None
     lp_status: LockStatus = LockStatus.NONE
     liq_to_mcap_pct: float | None = None

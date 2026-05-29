@@ -43,6 +43,26 @@ def pool_liquidity(gecko_pools: list[dict]) -> float:
     return total
 
 
+def _f(v) -> float | None:
+    try:
+        return float(v) if v is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def price_change_24h(gecko_pools: list[dict]) -> float | None:
+    """24h % price change from the deepest pool (most representative)."""
+    best, best_res = None, -1.0
+    for p in gecko_pools:
+        a = p.get("attributes") or {}
+        res = _f(a.get("reserve_in_usd")) or 0.0
+        if res > best_res:
+            best_res, best = res, a
+    if not best:
+        return None
+    return _f((best.get("price_change_percentage") or {}).get("h24"))
+
+
 def analyze_dex(
     info: TokenInfo,
     market: dict,
@@ -73,6 +93,7 @@ def analyze_dex(
         liquidity_usd=round(liquidity, 2),
         market_cap_usd=mcap,
         price_usd=market.get("price_usd"),
+        price_change_24h=price_change_24h(gecko_pools),
         volume24h_usd=market.get("volume24h_usd"),
         lp_status=lp_status,
         liq_to_mcap_pct=ratio,
