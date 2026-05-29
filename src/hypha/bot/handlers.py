@@ -1,6 +1,7 @@
-"""Command + callback handlers. Paste an address or use /analyze, /score, /holders, /dex.
-Heavy work runs inline for MVP (API-only = mostly awaiting HTTP); fan-out features move to
-the arq worker as they land. See SPEC.md §7."""
+"""Handlers — the bot is menu-driven: paste a CA (jetton address) and you get the full
+report plus a tappable menu (Holders / Whales / Liquidity / Refresh). Commands still work as
+shortcuts. Heavy work runs inline for MVP; fan-out features move to the arq worker as they
+land. See SPEC.md §7."""
 
 from __future__ import annotations
 
@@ -13,7 +14,7 @@ from ..analysis.service import analyze_token, analyze_whales
 from ..cache import rate_limit_ok
 from ..utils import clean_address
 from . import ui
-from .keyboards import report_keyboard
+from .keyboards import menu_keyboard
 
 log = structlog.get_logger(__name__)
 router = Router()
@@ -27,8 +28,13 @@ async def _guard(message: Message) -> bool:
     return True
 
 
-async def _run(message: Message, raw: str | None, renderer, *, with_kb: bool, force: bool = False):
-    address = clean_address(raw or "")
+def _address_from(raw: str | None) -> str | None:
+    return clean_address(raw or "")
+
+
+async def _show_token(message: Message, raw: str | None, renderer, current: str):
+    """Render a token view (report/holders/dex) with the full navigation menu."""
+    address = _address_from(raw)
     if not address:
         await message.answer(ui.BAD_ADDRESS)
         return
@@ -36,16 +42,17 @@ async def _run(message: Message, raw: str | None, renderer, *, with_kb: bool, fo
         return
     placeholder = await message.answer(ui.SPROUTING)
     try:
-        report = await analyze_token(address, force=force)
-        kb = report_keyboard(report) if with_kb else None
-        await placeholder.edit_text(renderer(report), reply_markup=kb, disable_web_page_preview=True)
+        report = await analyze_token(address)
+        await placeholder.edit_text(
+            renderer(report), reply_markup=menu_keyboard(report, current), disable_web_page_preview=True
+        )
     except Exception as exc:  # noqa: BLE001
         log.exception("analyze_failed", address=address)
         await placeholder.edit_text(f"🍄 Something rotted in the mycelium: <code>{exc}</code>")
 
 
-async def _run_whales(message: Message, raw: str | None, *, force: bool = False):
-    address = clean_address(raw or "")
+async def _show_whales(message: Message, raw: str | None):
+    address = _address_from(raw)
     if not address:
         await message.answer(ui.BAD_ADDRESS)
         return
@@ -53,14 +60,18 @@ async def _run_whales(message: Message, raw: str | None, *, force: bool = False)
         return
     placeholder = await message.answer(ui.SCANNING)
     try:
-        report, portfolio = await analyze_whales(address, force=force)
-        await placeholder.edit_text(ui.render_whales(report, portfolio), disable_web_page_preview=True)
+        report, portfolio = await analyze_whales(address)
+        await placeholder.edit_text(
+            ui.render_whales(report, portfolio),
+            reply_markup=menu_keyboard(report, "whales"),
+            disable_web_page_preview=True,
+        )
     except Exception as exc:  # noqa: BLE001
         log.exception("whales_failed", address=address)
         await placeholder.edit_text(f"🐋 Couldn't scan the top wallets: <code>{exc}</code>")
 
 
-# ── commands ──────────────────────────────────────────────────────────────────
+# ── commands (shortcuts; the primary UX is pasting a CA) ────────────────────────
 @router.message(CommandStart())
 @router.message(Command("help"))
 async def cmd_start(message: Message) -> None:
@@ -69,46 +80,50 @@ async def cmd_start(message: Message) -> None:
 
 @router.message(Command("analyze", "score"))
 async def cmd_analyze(message: Message, command: CommandObject) -> None:
-    await _run(message, command.args, ui.render_report, with_kb=True)
+    await _show_token(message, command.args, ui.render_report, "report")
 
 
 @router.message(Command("holders"))
 async def cmd_holders(message: Message, command: CommandObject) -> None:
-    await _run(message, command.args, ui.render_holders, with_kb=False)
+    await _show_token(message, command.args, ui.render_holders, "holders")
 
 
 @router.message(Command("whales", "portfolio"))
 async def cmd_whales(message: Message, command: CommandObject) -> None:
-    await _run_whales(message, command.args)
+    await _show_whales(message, command.args)
 
 
 @router.message(Command("dex"))
 async def cmd_dex(message: Message, command: CommandObject) -> None:
-    await _run(message, command.args, ui.render_dex, with_kb=False)
+    await _show_token(message, command.args, ui.render_dex, "dex")
 
 
 @router.message(F.text.func(lambda t: clean_address(t) is not None))
 async def on_address(message: Message) -> None:
-    await _run(message, message.text, ui.render_report, with_kb=True)
+    """The main path: any message containing a TON address -> full report + menu."""
+    await _show_token(message, message.text, ui.render_report, "report")
 
 
-# ── callbacks ─────────────────────────────────────────────────────────────────
-_RENDERERS = {
-    "refresh": (ui.render_report, True, True),
-    "holders": (ui.render_holders, False, False),
-    "dex": (ui.render_dex, False, False),
+# ── callbacks (menu navigation) ─────────────────────────────────────────────────
+# section -> (renderer, force-refresh, current-tab)
+_TOKEN_VIEWS = {
+    "report": (ui.render_report, False, "report"),
+    "refresh": (ui.render_report, True, "report"),
+    "holders": (ui.render_holders, False, "holders"),
+    "dex": (ui.render_dex, False, "dex"),
 }
 
 
-@router.callback_query(F.data.regexp(r"^(refresh|holders|dex):"))
-async def on_callback(cb: CallbackQuery) -> None:
+@router.callback_query(F.data.regexp(r"^(report|refresh|holders|dex):"))
+async def on_view(cb: CallbackQuery) -> None:
     action, _, address = cb.data.partition(":")
-    renderer, with_kb, force = _RENDERERS[action]
+    renderer, force, current = _TOKEN_VIEWS[action]
     await cb.answer("🍄 reading…")
     try:
         report = await analyze_token(address, force=force)
-        kb = report_keyboard(report) if with_kb else cb.message.reply_markup
-        await cb.message.edit_text(renderer(report), reply_markup=kb, disable_web_page_preview=True)
+        await cb.message.edit_text(
+            renderer(report), reply_markup=menu_keyboard(report, current), disable_web_page_preview=True
+        )
     except Exception as exc:  # noqa: BLE001
         log.exception("callback_failed", data=cb.data)
         await cb.answer(f"failed: {exc}", show_alert=True)
@@ -122,7 +137,7 @@ async def on_whales_callback(cb: CallbackQuery) -> None:
         report, portfolio = await analyze_whales(address)
         await cb.message.edit_text(
             ui.render_whales(report, portfolio),
-            reply_markup=cb.message.reply_markup,
+            reply_markup=menu_keyboard(report, "whales"),
             disable_web_page_preview=True,
         )
     except Exception as exc:  # noqa: BLE001

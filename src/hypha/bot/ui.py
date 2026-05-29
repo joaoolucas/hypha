@@ -10,14 +10,10 @@ from ..utils import bar, fmt_int, fmt_usd
 
 INTRO = (
     "🍄 <b>Hypha</b> — I sense the health of TON tokens through their mycelium.\n\n"
-    "Send me a jetton address (or <code>/analyze &lt;address&gt;</code>) and I'll return a "
-    "<b>Hypha Score</b>: holder spread, dev allocation, liquidity, launchpad status and more.\n\n"
-    "Try:\n"
-    "• <code>/analyze &lt;address&gt;</code> — full report\n"
-    "• <code>/score &lt;address&gt;</code> — just the score card\n"
-    "• <code>/holders &lt;address&gt;</code> — holder breakdown\n"
-    "• <code>/whales &lt;address&gt;</code> — what the top holders also own 🐋\n"
-    "• <code>/dex &lt;address&gt;</code> — liquidity &amp; LP check\n\n"
+    "<b>Just paste a token address (CA)</b> and I'll show everything — the <b>Hypha Score</b>, "
+    "holder spread, dev allocation, liquidity &amp; launchpad status — with a menu to dig into "
+    "holders, 🐋 whales and liquidity. No commands needed.\n\n"
+    "<i>Shortcuts (optional):</i> /analyze · /holders · /whales · /dex\n\n"
     "<i>Hypha is a heuristic risk aid, not financial advice.</i>"
 )
 
@@ -103,7 +99,8 @@ def render_report(report: TokenReport) -> str:
         parts.append("")
         parts += [f"• <i>{_esc(n)}</i>" for n in extra_notes[:4]]
 
-    parts.append("\n<i>Not financial advice.</i>")
+    parts.append("\n👇 <i>Tap below: holders · 🐋 whales · liquidity</i>")
+    parts.append("<i>Not financial advice.</i>")
     return "\n".join(parts)
 
 
