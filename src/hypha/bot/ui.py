@@ -11,7 +11,7 @@ import html
 from urllib.parse import quote
 
 from ..models import TokenReport
-from ..utils import fmt_int, fmt_price, fmt_usd
+from ..utils import fmt_int, fmt_price, fmt_usd, to_friendly
 
 INTRO = (
     "🍄 <b>Hypha</b> — I sense the health of TON tokens through their mycelium.\n\n"
@@ -71,8 +71,9 @@ def viewer_links(addr: str) -> str:
 
 
 def _wallet_link(addr: str) -> str:
-    """Truncated address linking to that wallet's holdings tab on Tonviewer."""
-    return f'<a href="https://tonviewer.com/{quote(addr, safe="")}?section=tokens">{_short(addr)}</a>'
+    """Truncated user-friendly (UQ…) address linking to that wallet's holdings on Tonviewer."""
+    friendly = to_friendly(addr)
+    return f'<a href="https://tonviewer.com/{quote(friendly, safe="")}?section=tokens">{_short(friendly)}</a>'
 
 
 def _verification_mark(t) -> str:
@@ -84,22 +85,22 @@ def _verification_mark(t) -> str:
 
 
 def _smart_money(pf) -> list[str]:
-    """Full top-wallet signal, inline on the card: headline whale count + median bag, the
-    tokens the top holders share, and the most notable wallets with their bags."""
-    if not pf or not pf.scanned:
+    """Top-wallet signal, inline on the card: the most notable top holders, each linking to
+    its Tonviewer holdings, with a stables/tokens split and the per-token USD it holds."""
+    if not pf or not pf.wallets:
         return []
-    L = [
-        "", "🐋 <b>Top Wallet Signal</b>",
-        f"{pf.whale_wallets}/{pf.scanned} whales · median bag {fmt_usd(pf.median_portfolio_usd)}",
-    ]
-
-    if pf.wallets:
-        L += ["", "<b>Notable wallets</b>"]
-        for i, w in enumerate(pf.wallets[:3], 1):
-            bags = ", ".join(f"${_esc(b['symbol'])}" for b in w.top_bags if b.get("symbol"))
-            L.append(f"{i}. {_wallet_link(w.owner)} · {fmt_usd(w.portfolio_usd)} · {w.token_count} tokens")
-            if bags:
-                L.append(f"   holds {bags}")
+    L = ["", "🐋 <b>Top Wallet Signal</b>"]
+    for i, w in enumerate(pf.wallets[:3], 1):
+        L.append(
+            f"{i}. {_wallet_link(w.owner)} — {fmt_usd(w.portfolio_usd)}"
+            f"  (🪙 {fmt_usd(w.tokens_usd)} · 💵 {fmt_usd(w.stables_usd)})"
+        )
+        bags = " · ".join(
+            f"${_esc(b['symbol'])} {fmt_usd(b['usd'])}"
+            for b in w.top_bags if b.get("symbol") and b.get("usd")
+        )
+        if bags:
+            L.append(f"   {bags}")
     return L
 
 
@@ -121,13 +122,6 @@ def render_report(report: TokenReport, pf=None) -> str:
         L.append(f"💰 MC <b>{fmt_usd(d.market_cap_usd)}</b> · 💧 Liq {fmt_usd(d.liquidity_usd)} · 📊 Vol {fmt_usd(d.volume24h_usd)}")
     else:
         L.append("<i>market data unavailable</i>")
-
-    # ── momentum (memecoin gold) ──
-    if d and any(v is not None for v in (d.change_5m, d.change_1h, d.price_change_24h)):
-        L += ["", "🚀 <b>Momentum</b>",
-              f"5m {_pct(d.change_5m)} · 1h {_pct(d.change_1h)} · 24h {_pct(d.price_change_24h)}"]
-        if d.vol_trend:
-            L.append(f"Volume: {d.vol_trend}")
 
     # ── holders + growth ──
     if h:

@@ -2,11 +2,38 @@
 
 from __future__ import annotations
 
+import base64
 import re
 
 # user-friendly: 48 base64url chars (EQ/UQ/kQ/0Q…); raw: workchain:hex64
 _FRIENDLY = re.compile(r"^[EUk0][QcfF][A-Za-z0-9_-]{46}$")
 _RAW = re.compile(r"^-?\d+:[0-9a-fA-F]{64}$")
+
+
+def _crc16(data: bytes) -> bytes:
+    """CRC16/XMODEM, as used by TON user-friendly addresses."""
+    crc = 0
+    for b in data:
+        crc ^= b << 8
+        for _ in range(8):
+            crc = ((crc << 1) ^ 0x1021) if crc & 0x8000 else (crc << 1)
+            crc &= 0xFFFF
+    return crc.to_bytes(2, "big")
+
+
+def to_friendly(addr: str, *, bounceable: bool = False) -> str:
+    """Convert a raw `workchain:hex` address to the user-friendly base64url form (UQ… for
+    non-bounceable, EQ… for bounceable). Returns the input unchanged if already friendly."""
+    if not addr or ":" not in addr:
+        return addr
+    try:
+        wc_str, hex_part = addr.split(":")
+        hash_bytes = bytes.fromhex(hex_part)
+    except ValueError:
+        return addr
+    tag = 0x11 if bounceable else 0x51
+    payload = bytes([tag, int(wc_str) & 0xFF]) + hash_bytes
+    return base64.urlsafe_b64encode(payload + _crc16(payload)).decode()
 
 
 def clean_address(text: str) -> str | None:

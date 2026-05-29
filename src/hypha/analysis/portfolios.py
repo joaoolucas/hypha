@@ -17,6 +17,13 @@ from ..connectors.tonapi import TonAPI
 from ..models import Holder, PortfolioReport, TokenHolding, WhaleWallet
 
 
+_STABLE_SYMBOLS = {"USDT", "USD₮", "USDC", "USDE", "JUSDT", "JUSDC", "DAI", "TSUSDE", "USDA"}
+
+
+def _is_stable(symbol: str) -> bool:
+    return symbol.upper() in _STABLE_SYMBOLS
+
+
 def _usd(bal: dict, decimals: int) -> float:
     try:
         amt = int(bal.get("balance", 0) or 0) / (10 ** decimals)
@@ -62,7 +69,7 @@ async def analyze_portfolios(
         if isinstance(res, BaseException):
             continue
         bags: list[dict] = []
-        portfolio_usd = 0.0
+        portfolio_usd = stables_usd = tokens_usd = 0.0
         for bal in res:
             j = bal.get("jetton") or {}
             addr, sym = j.get("address"), j.get("symbol", "")
@@ -75,6 +82,10 @@ async def analyze_portfolios(
             usd = _usd(bal, decimals)
             is_whale = usd >= whale_usd
             portfolio_usd += usd
+            if _is_stable(sym):
+                stables_usd += usd
+            else:
+                tokens_usd += usd
             bags.append({"symbol": sym, "usd": round(usd, 2), "whale": is_whale})
 
             e = agg.setdefault(addr, {
@@ -89,7 +100,9 @@ async def analyze_portfolios(
         bags.sort(key=lambda b: b["usd"], reverse=True)
         wallets.append(WhaleWallet(
             owner=holder.owner, label=holder.label,
-            portfolio_usd=round(portfolio_usd, 2), token_count=len(bags), top_bags=bags[:3],
+            portfolio_usd=round(portfolio_usd, 2),
+            stables_usd=round(stables_usd, 2), tokens_usd=round(tokens_usd, 2),
+            token_count=len(bags), top_bags=bags[:4],
         ))
 
     shared = [

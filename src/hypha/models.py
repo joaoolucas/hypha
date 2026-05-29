@@ -129,6 +129,8 @@ class WhaleWallet(BaseModel):
     owner: str
     label: str | None = None
     portfolio_usd: float = 0.0
+    stables_usd: float = 0.0     # USD held in stablecoins (USDT/USDe/…)
+    tokens_usd: float = 0.0      # USD held in non-stable jettons
     token_count: int = 0
     top_bags: list[dict] = Field(default_factory=list)   # [{symbol, usd, whale}]
 
