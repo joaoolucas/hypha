@@ -111,13 +111,20 @@ def dedupe_pools(pools: list[HotPool], limit: int) -> list[HotPool]:
 
 
 async def hot_pools(gecko: GeckoTerminal, limit: int | None = None) -> list[HotPool]:
-    """Fetch trending + new pools, normalize, dedupe and cap. Trending first so new pools
-    only fill the long tail (trending wins on the volume sort anyway)."""
+    """Fetch trending + new + top-volume pools (a couple of pages each), normalize, dedupe and
+    cap. Top-volume widens coverage to the most actively traded tokens so alerts aren't dominated
+    by one or two names; trending/new add momentum and fresh launches."""
     cap = limit if limit is not None else get_settings().hot_pools_max
+    # (fetch coroutine, reason) — top-volume paged deepest since it's the broadest signal.
+    feeds = [
+        (gecko.top_pools(1), "top"), (gecko.top_pools(2), "top"),
+        (gecko.trending_pools(1), "trending"), (gecko.trending_pools(2), "trending"),
+        (gecko.new_pools(1), "new"),
+    ]
     pools: list[HotPool] = []
-    for fetch, reason in ((gecko.trending_pools, "trending"), (gecko.new_pools, "new")):
+    for coro, reason in feeds:
         try:
-            pools += normalize_pools(await fetch(), reason)
-        except Exception as exc:  # noqa: BLE001 — one feed failing shouldn't sink discovery
+            pools += normalize_pools(await coro, reason)
+        except Exception as exc:  # noqa: BLE001 — one feed/page failing shouldn't sink discovery
             log.warning("hot_pool_feed_failed", reason=reason, error=str(exc))
     return dedupe_pools(pools, cap)

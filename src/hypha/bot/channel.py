@@ -44,6 +44,14 @@ def _fmt_ton(ton: float) -> str:
     return f"{ton:,.0f}" if ton >= 10 else f"{ton:.1f}"
 
 
+_VENUE_DISPLAY = {"dedust": "🟡 DeDust", "stonfi": "🔵 STON.fi"}
+
+
+def _venue(v: str) -> str:
+    low = (v or "").lower()
+    return _VENUE_DISPLAY.get(low, low.title() if low else "")
+
+
 def _size(trade: Trade) -> str:
     """Size in TON with USD in parens, e.g. '100 TON ($285) · $DUROVIUS'. Falls back to USD,
     then bare symbol, when the TON leg / price is unknown."""
@@ -60,13 +68,13 @@ def _headline(trade: Trade, ctx: TraderContext) -> str:
     size = _size(trade)
     if trade.side == TradeSide.BUY:
         if ctx.is_whale:
-            return f"🐋 <b>Whale buy · {size}</b>"
+            return f"🐋 <b>WHALE BUY · {size}</b>"
         if ctx.is_followed:
-            return f"👣 <b>Followed buy · {size}</b>"
-        return f"🟢 <b>Big buy · {size}</b>"
+            return f"👣 <b>FOLLOWED BUY · {size}</b>"
+        return f"🟢 <b>BUY · {size}</b>"
     if ctx.is_whale:
-        return f"🐋📉 <b>Whale sell · {size}</b>"
-    return f"🔴 <b>Big sell · {size}</b>"
+        return f"🐋📉 <b>WHALE SELL · {size}</b>"
+    return f"🔴 <b>SELL · {size}</b>"
 
 
 def render_alert(
@@ -77,10 +85,11 @@ def render_alert(
     promoted: bool = False,
 ) -> tuple[str, InlineKeyboardMarkup | None]:
     t, d = report.token, report.dex
-    L: list[str] = [_headline(trade, ctx)]
-    venue = trade.venue or (d.venues[0] if d and d.venues else "")
+    head = _headline(trade, ctx)
+    venue = _venue(trade.venue or (d.venues[0] if d and d.venues else ""))
     if venue:
-        L.append(f"<i>via {_esc(venue)}</i>")
+        head = f"{head} - {venue}"
+    L: list[str] = [head]
 
     # market snapshot
     if d:

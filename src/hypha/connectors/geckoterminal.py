@@ -58,21 +58,32 @@ class GeckoTerminal(BaseConnector):
         )
         return d.get("data", []) or []
 
-    async def trending_pools(self) -> list[dict]:
+    async def trending_pools(self, page: int = 1) -> list[dict]:
         """Hottest TON pools (by recent volume/movement). Discovery seed for the tracker."""
         d = await self.get(
             "/networks/ton/trending_pools",
-            params={"duration": "1h"},
-            cache_key="gt:trending:ton",
+            params={"duration": "1h", "page": page},
+            cache_key=f"gt:trending:ton:{page}",
             ttl=300,
         )
         return d.get("data", []) or []
 
-    async def new_pools(self) -> list[dict]:
+    async def new_pools(self, page: int = 1) -> list[dict]:
         """Freshest TON pools — where early whale entries show up first."""
         d = await self.get(
             "/networks/ton/new_pools",
-            cache_key="gt:new:ton",
+            params={"page": page},
+            cache_key=f"gt:new:ton:{page}",
+            ttl=300,
+        )
+        return d.get("data", []) or []
+
+    async def top_pools(self, page: int = 1) -> list[dict]:
+        """Top TON pools by 24h volume — the most actively traded tokens (widest coverage)."""
+        d = await self.get(
+            "/networks/ton/pools",
+            params={"sort": "h24_volume_usd_desc", "page": page},
+            cache_key=f"gt:top:ton:{page}",
             ttl=300,
         )
         return d.get("data", []) or []
