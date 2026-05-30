@@ -33,8 +33,13 @@ _MAX_POSTS_PER_CYCLE = 15        # flood guard; drops beyond this are logged, ne
 
 
 def _should_post(trade: Trade, ctx, s: Settings, buy_floor_usd: float) -> bool:
+    """Whale-only channel: post a trade only if the trader is a whale (by portfolio) or a
+    wallet we follow. Size is a secondary filter — whale buys must clear the buy floor; followed
+    wallets post any buy (the point of following them); sells must clear the sell floor."""
+    if ctx.excluded or not (ctx.is_whale or ctx.is_followed):
+        return False
     if trade.side == TradeSide.BUY:
-        return trade.usd >= buy_floor_usd or ctx.is_followed
+        return ctx.is_followed or trade.usd >= buy_floor_usd
     return trade.usd >= s.sell_alert_usd
 
 
@@ -59,10 +64,9 @@ async def handle_trade(trade: Trade, tonapi: TonAPI, bot, s: Settings,
     trade.usd = await _price_in_usd(trade, report)
     ctx = await enrich_trader(trade.trader, tonapi, s)
 
-    if not _should_post(trade, ctx, s, floor):
-        return False
-
-    # auto-promotion: a real, sized buy by a real wallet counts toward the followed list
+    # Auto-promotion runs BEFORE the post gate and regardless of whale status: a wallet that
+    # repeatedly makes sized buys is smart money worth following, even if its portfolio is light.
+    # Crossing the threshold flips is_followed so this very buy posts as the promotion moment.
     promoted = False
     if trade.side == TradeSide.BUY and trade.usd >= floor and not ctx.excluded:
         ctx.big_buys = await state.record_big_buy(trade.trader, s.promote_window_secs)
@@ -72,6 +76,9 @@ async def handle_trade(trade: Trade, tonapi: TonAPI, bot, s: Settings,
             await state.add_followed(trade.trader)
             ctx.is_followed = promoted = True
             log.info("wallet_promoted", trader=trade.trader, buys=ctx.big_buys)
+
+    if not _should_post(trade, ctx, s, floor):
+        return False
 
     text, kb = render_alert(trade, ctx, report, promoted=promoted)
     posted = await publish_alert(bot, s.alerts_channel_id, text, kb)
@@ -156,7 +163,9 @@ async def follow_cycle(gecko: GeckoTerminal, tonapi: TonAPI, bot, s: Settings) -
     wallets = (await state.followed_list())[: s.followed_max]
     if not wallets:
         return
-    buy_floor = _buy_floor(s, await _ton_price(tonapi))
+    # These wallets are already vetted smart money, so post their buys at any size (floor 0);
+    # _should_post still gates sells by the sell floor.
+    buy_floor = 0.0
     sem = asyncio.Semaphore(s.trade_concurrency)
 
     async def _fresh(wallet):

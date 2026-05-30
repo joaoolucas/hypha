@@ -105,6 +105,14 @@ class TonAPI(BaseConnector):
         )
         return d.get("events", []) or []
 
+    async def account_ton(self, addr: str) -> float:
+        """An account's native TON balance (whole TON) — counts toward whale portfolio value."""
+        d = await self.get(f"/v2/accounts/{addr}", cache_key=f"ta:acct:{addr}", ttl=120)
+        try:
+            return int(d.get("balance", 0) or 0) / 1e9
+        except (TypeError, ValueError):
+            return 0.0
+
     async def ton_usd(self) -> float:
         """Current TON/USD price — used to size swaps by their TON leg (cached briefly)."""
         d = await self.get(

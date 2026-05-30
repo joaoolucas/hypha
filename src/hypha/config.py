@@ -126,8 +126,8 @@ class Settings(BaseSettings):
     alerts_enabled: bool = True        # master switch for the token-centric trade poller
     admin_ids: str = ""                # comma/space-separated tg user ids allowed to /track
 
-    buy_alert_ton: float = 250.0       # primary BUY threshold, TON-denominated (TON-native audience)
-    buy_alert_usd: float = 700.0       # fallback BUY floor (USD) when the TON price is unavailable
+    buy_alert_ton: float = 100.0       # min BUY size (TON) — secondary; the primary gate is "is a whale"
+    buy_alert_usd: float = 200.0       # fallback BUY floor (USD) when the TON price is unavailable
     sell_alert_usd: float = 10_000.0   # post a SELL only at/above this USD (big dumps)
     whale_portfolio_usd: float = 10_000.0   # buyer tagged 🐋 at/above this total portfolio USD
 

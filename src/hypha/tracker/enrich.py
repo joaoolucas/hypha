@@ -63,6 +63,14 @@ async def enrich_trader(trader_raw: str, tonapi: TonAPI, settings: Settings) -> 
         if usd >= 1 and sym.upper() not in _STABLE_SYMBOLS:
             bags.append({"symbol": sym, "usd": round(usd, 2)})
 
+    # native TON counts toward whale value too (some whales hold mostly TON, not jettons)
+    try:
+        ton_usd = await tonapi.ton_usd()
+        if ton_usd:
+            portfolio += await tonapi.account_ton(trader_raw) * ton_usd
+    except Exception as exc:  # noqa: BLE001 — TON balance is a bonus signal, never fatal
+        log.warning("enrich_ton_balance_failed", trader=trader_raw, error=str(exc))
+
     bags.sort(key=lambda b: b["usd"], reverse=True)
     ctx.portfolio_usd = round(portfolio, 2)
     ctx.is_whale = portfolio >= settings.whale_portfolio_usd

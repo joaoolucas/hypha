@@ -96,14 +96,22 @@ async def test_big_buy_posts(captured, monkeypatch):
 
 
 async def test_small_buy_not_posted(captured, monkeypatch):
-    _patch_enrich(monkeypatch)                              # not whale, not followed
+    _patch_enrich(monkeypatch, is_whale=True)              # whale, but below the size floor
     tr = _trade(usd=500, trader="0:b2", token="EQb2", tx="b2")
     assert await service.handle_trade(tr, None, None, _settings()) is False
     assert captured == []
 
 
+async def test_non_whale_big_buy_not_posted(captured, monkeypatch):
+    # the reported bug: a big buy by a non-whale, non-followed wallet must NOT post
+    _patch_enrich(monkeypatch)                              # not a whale, not followed
+    tr = _trade(usd=5000, trader="0:nonwhale", token="EQnw", tx="nw")
+    assert await service.handle_trade(tr, None, None, _settings()) is False
+    assert captured == []
+
+
 async def test_small_sell_dropped_big_sell_posted(captured, monkeypatch):
-    _patch_enrich(monkeypatch)
+    _patch_enrich(monkeypatch, is_whale=True)              # whale seller
     small = _trade(side=TradeSide.SELL, usd=5000, trader="0:s1", token="EQs1", tx="s1")
     assert await service.handle_trade(small, None, None, _settings()) is False
     big = _trade(side=TradeSide.SELL, usd=12000, trader="0:s2", token="EQs2", tx="s2")
@@ -123,7 +131,7 @@ def test_buy_floor_ton_denominated():
 
 
 async def test_handle_respects_explicit_buy_floor(captured, monkeypatch):
-    _patch_enrich(monkeypatch)                     # unknown trader, not followed
+    _patch_enrich(monkeypatch, is_whale=True)      # whale; size floor still applies to whale buys
     below = _trade(usd=350, trader="0:fl1", token="EQfl1", tx="fl1")
     assert await service.handle_trade(below, None, None, _settings(), buy_floor_usd=400) is False
     above = _trade(usd=450, trader="0:fl2", token="EQfl2", tx="fl2")
