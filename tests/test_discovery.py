@@ -1,6 +1,6 @@
 """Token-centric discovery — picking the memecoin side of a pool and dropping non-targets."""
 
-from hypha.analysis.discovery import dedupe_pools, is_quote_asset, normalize_pools
+from hypha.analysis.discovery import dedupe_pools, hot_pools, is_quote_asset, normalize_pools
 
 
 def _pool(addr, name, base_id, quote_id, dex="stonfi", reserve="50000", vol="100000"):
@@ -54,6 +54,30 @@ def test_dedust_fee_suffix_stripped():
     assert len(pools) == 1
     assert pools[0].token_symbol == "DUROVIUS"
     assert pools[0].quote_symbol == "TON"          # fee suffix stripped, not "TON 0.25%"
+
+
+class _FakeGecko:
+    def __init__(self, top=None, trending=None, new=None):
+        self._top, self._trending, self._new = top or [], trending or [], new or []
+
+    async def top_pools(self, page=1):
+        return self._top if page == 1 else []
+
+    async def trending_pools(self, page=1):
+        return self._trending if page == 1 else []
+
+    async def new_pools(self, page=1):
+        return self._new if page == 1 else []
+
+
+async def test_hot_pools_reserves_fresh_launches_over_volume():
+    # a huge-volume established pool and a brand-new low-volume launch
+    top = [_pool("EQbig", "BIG / TON", "EQb", "EQton", vol="9999999")]
+    new = [_pool("EQfresh", "FRESH / TON", "EQf", "EQton", vol="5")]
+    pools = await hot_pools(_FakeGecko(top=top, new=new), limit=10)
+    addrs = {p.pool_address for p in pools}
+    assert "EQfresh" in addrs       # low-volume launch is reserved, not crowded out
+    assert "EQbig" in addrs
 
 
 def test_dedupe_and_volume_sort_and_cap():

@@ -132,7 +132,8 @@ class Settings(BaseSettings):
     whale_portfolio_usd: float = 10_000.0   # buyer tagged 🐋 at/above this total portfolio USD
 
     # Token-centric discovery (watch the hottest pools' trade feeds)
-    hot_pools_max: int = 60            # how many hot pools to watch for trades
+    hot_pools_max: int = 120           # how many hot pools to watch for trades
+    new_pools_reserve: int = 50        # of those, always watch the freshest launches (not crowded out by volume)
     trades_poll_secs: int = 120        # trade-poll cycle interval (seconds); trades come from TonAPI
     discovery_poll_secs: int = 1_800   # how often the hot-pool set is refreshed (Gecko)
     trade_concurrency: int = 6         # cap concurrent TonAPI pool-event calls

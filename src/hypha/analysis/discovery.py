@@ -97,34 +97,49 @@ def normalize_pools(raw_pools: list[dict], reason: str) -> list[HotPool]:
     return out
 
 
-def dedupe_pools(pools: list[HotPool], limit: int) -> list[HotPool]:
-    """Drop duplicate pools (keep first seen), sort by 24h volume, cap to `limit`."""
+def _dedupe(pools: list[HotPool]) -> list[HotPool]:
+    """Drop duplicate pool addresses, keeping first-seen (preserves feed order)."""
     seen: set[str] = set()
-    unique: list[HotPool] = []
+    out: list[HotPool] = []
     for p in pools:
-        if p.pool_address in seen:
-            continue
-        seen.add(p.pool_address)
-        unique.append(p)
-    unique.sort(key=lambda p: p.volume24h_usd, reverse=True)
-    return unique[:limit]
+        if p.pool_address not in seen:
+            seen.add(p.pool_address)
+            out.append(p)
+    return out
+
+
+def dedupe_pools(pools: list[HotPool], limit: int) -> list[HotPool]:
+    """Dedupe, sort by 24h volume, cap to `limit`."""
+    return sorted(_dedupe(pools), key=lambda p: p.volume24h_usd, reverse=True)[:limit]
+
+
+async def _gather(feeds: list[tuple]) -> list[HotPool]:
+    out: list[HotPool] = []
+    for coro, reason in feeds:
+        try:
+            out += normalize_pools(await coro, reason)
+        except Exception as exc:  # noqa: BLE001 — one feed/page failing shouldn't sink discovery
+            log.warning("hot_pool_feed_failed", reason=reason, error=str(exc))
+    return out
 
 
 async def hot_pools(gecko: GeckoTerminal, limit: int | None = None) -> list[HotPool]:
-    """Fetch trending + new + top-volume pools (a couple of pages each), normalize, dedupe and
-    cap. Top-volume widens coverage to the most actively traded tokens so alerts aren't dominated
-    by one or two names; trending/new add momentum and fresh launches."""
-    cap = limit if limit is not None else get_settings().hot_pools_max
-    # (fetch coroutine, reason) — top-volume paged deepest since it's the broadest signal.
-    feeds = [
+    """Build the watch set from two signals, so fresh launches aren't crowded out by volume:
+      • freshest launches (new-pools feed, recency order) — reserved slots regardless of volume
+      • most actively traded (top-volume + trending) — fills the rest, sorted by volume
+    StonksLabs and other launchpads that trade on a DEX from launch surface in the new feed."""
+    s = get_settings()
+    cap = limit if limit is not None else s.hot_pools_max
+    reserve = min(s.new_pools_reserve, cap)
+
+    fresh = _dedupe(await _gather([
+        (gecko.new_pools(1), "new"), (gecko.new_pools(2), "new"), (gecko.new_pools(3), "new"),
+    ]))[:reserve]
+    seen = {p.pool_address for p in fresh}
+
+    volume = await _gather([
         (gecko.top_pools(1), "top"), (gecko.top_pools(2), "top"),
         (gecko.trending_pools(1), "trending"), (gecko.trending_pools(2), "trending"),
-        (gecko.new_pools(1), "new"),
-    ]
-    pools: list[HotPool] = []
-    for coro, reason in feeds:
-        try:
-            pools += normalize_pools(await coro, reason)
-        except Exception as exc:  # noqa: BLE001 — one feed/page failing shouldn't sink discovery
-            log.warning("hot_pool_feed_failed", reason=reason, error=str(exc))
-    return dedupe_pools(pools, cap)
+    ])
+    by_volume = [p for p in dedupe_pools(volume, cap) if p.pool_address not in seen]
+    return (fresh + by_volume)[:cap]
