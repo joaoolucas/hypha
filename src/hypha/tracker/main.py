@@ -56,7 +56,11 @@ async def main() -> None:
 
     log.info("tracker_starting", hot_pools=s.hot_pools_max,
              trade_secs=s.trades_poll_secs, follow_secs=s.follow_poll_secs)
-    await discovery_cycle(gecko, s)          # seed the hot-pool set before trading starts
+    for attempt in range(6):                 # seed the hot-pool set before trading; retry transient throttle
+        if await discovery_cycle(gecko, s) > 0:
+            break
+        log.warning("discovery_retry", attempt=attempt + 1)
+        await asyncio.sleep(20)
 
     loops = [_loop("discovery", s.discovery_poll_secs, lambda: discovery_cycle(gecko, s)),
              _loop("trades", s.trades_poll_secs, lambda: trade_cycle(gecko, tonapi, bot, s))]

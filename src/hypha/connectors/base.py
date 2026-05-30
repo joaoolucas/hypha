@@ -46,9 +46,13 @@ class BaseConnector:
         headers: dict[str, str] | None = None,
         timeout: float = 15.0,
         min_interval: float = 0.0,
+        retry_429: bool = True,
     ):
         self.base_url = base_url.rstrip("/")
         self.min_interval = min_interval     # min seconds between network calls (0 = unthrottled)
+        # Retrying a rate-limited source just keeps its penalty hot. Sources we poll on a loop
+        # (and can simply re-read next cycle) fail fast on 429 instead.
+        self.retry_429 = retry_429
         self._client = httpx.AsyncClient(
             base_url=self.base_url,
             headers=headers or {},
@@ -80,6 +84,9 @@ class BaseConnector:
     async def _request(self, method: str, path: str, **kw: Any) -> Any:
         await self._pace()
         resp = await self._client.request(method, path, **kw)
+        if resp.status_code == 429 and not self.retry_429:
+            log.warning("http_rate_limited", source=self.name, path=path)
+            raise ConnectorError(f"{self.name} 429 rate-limited: {path}")
         if resp.status_code == 429 or resp.status_code >= 500:
             log.warning("http_retryable", source=self.name, path=path, status=resp.status_code)
             raise RetryableHTTP(f"{self.name} {resp.status_code}")

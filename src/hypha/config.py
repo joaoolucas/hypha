@@ -132,10 +132,10 @@ class Settings(BaseSettings):
 
     # Token-centric discovery (watch the hottest pools' trade feeds)
     hot_pools_max: int = 20            # how many hot pools to watch for trades
-    trades_poll_secs: int = 150        # trade-poll cycle interval (seconds)
-    discovery_poll_secs: int = 1_800   # how often the hot-pool set is refreshed
-    trade_concurrency: int = 6         # cap concurrent Gecko trade-feed calls
-    gecko_min_interval: float = 4.0    # min seconds between GeckoTerminal calls (free tier; ~15/min)
+    trades_poll_secs: int = 120        # trade-poll cycle interval (seconds); trades come from TonAPI
+    discovery_poll_secs: int = 1_800   # how often the hot-pool set is refreshed (Gecko)
+    trade_concurrency: int = 6         # cap concurrent TonAPI pool-event calls
+    gecko_min_interval: float = 5.0    # min seconds between GeckoTerminal calls (discovery only now)
 
     # Wallet-centric follow (Phase 3: auto-promote recurring big buyers, track them everywhere)
     follow_enabled: bool = True        # follow promoted whales into cold (non-trending) tokens

@@ -31,6 +31,7 @@ class GeckoTerminal(BaseConnector):
             s.geckoterminal_base,
             headers={"Accept": "application/json"},
             min_interval=s.gecko_min_interval,
+            retry_429=False,     # polled on a loop; skip a rate-limited pool, re-read next cycle
         )
 
     async def token_market(self, addr: str) -> dict:

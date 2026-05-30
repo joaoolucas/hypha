@@ -1,6 +1,6 @@
-"""Swap classification — Gecko pool trades + TonAPI events into normalized buy/sell Trades."""
+"""Swap classification — TonAPI pool/account events + Gecko trades into buy/sell Trades."""
 
-from hypha.analysis.trades import parse_gecko_trades, parse_tonapi_events
+from hypha.analysis.trades import parse_gecko_trades, parse_pool_events, parse_tonapi_events
 from hypha.models import HotPool, TradeSide
 from hypha.utils import to_raw
 
@@ -82,6 +82,57 @@ def test_tonapi_sell_with_ton_out():
     jin = {"address": TOKEN, "symbol": "SHROOM", "decimals": 9}
     trades = parse_tonapi_events([_swap(ton_out=2_000_000_000, jin=jin)], "0:wallet")
     assert len(trades) == 1 and trades[0].side == TradeSide.SELL
+
+
+TOKEN_RAW = "0:" + "aa" * 32
+POOL2 = HotPool(pool_address="EQpool2", token_address=TOKEN_RAW, token_symbol="SHROOM", venue="dedust")
+
+
+def _pool_event(*, jin=None, jout=None, ton_in=0, ton_out=0, user="0:" + "bb" * 32, status="ok"):
+    sw = {"dex": "dedust", "amount_in": "1000000000", "amount_out": "5000000000",
+          "user_wallet": {"address": user}}
+    if ton_in:
+        sw["ton_in"] = ton_in
+    if ton_out:
+        sw["ton_out"] = ton_out
+    if jin:
+        sw["jetton_master_in"] = jin
+    if jout:
+        sw["jetton_master_out"] = jout
+    return {"timestamp": 1717000000, "event_id": "ev",
+            "actions": [{"type": "JettonSwap", "status": status, "JettonSwap": sw}]}
+
+
+def test_pool_event_buy_sized_by_ton_leg():
+    jout = {"address": TOKEN_RAW, "symbol": "SHROOM", "decimals": 9}
+    trades = parse_pool_events([_pool_event(jout=jout, ton_in=2_000_000_000)], POOL2, ton_usd=5.0)
+    assert len(trades) == 1
+    t = trades[0]
+    assert t.side == TradeSide.BUY
+    assert t.usd == 10.0                     # 2 TON × $5
+    assert t.token_amount == 5.0             # amount_out 5e9 / 1e9
+    assert t.trader == "0:" + "bb" * 32      # from user_wallet, not the queried pool
+    assert t.token_symbol == "SHROOM"
+
+
+def test_pool_event_sell_sized_by_ton_leg():
+    jin = {"address": TOKEN_RAW, "symbol": "SHROOM", "decimals": 9}
+    trades = parse_pool_events([_pool_event(jin=jin, ton_out=3_000_000_000)], POOL2, ton_usd=5.0)
+    assert len(trades) == 1 and trades[0].side == TradeSide.SELL and trades[0].usd == 15.0
+
+
+def test_pool_event_skips_unrelated_and_failed():
+    other = {"address": "0:" + "cc" * 32, "symbol": "OTHER", "decimals": 9}
+    assert parse_pool_events([_pool_event(jout=other, ton_in=1)], POOL2, 5.0) == []
+    jout = {"address": TOKEN_RAW, "symbol": "SHROOM", "decimals": 9}
+    assert parse_pool_events([_pool_event(jout=jout, ton_in=1, status="failed")], POOL2, 5.0) == []
+
+
+def test_pool_event_no_ton_leg_leaves_usd_zero():
+    # jetton/pTON-paired buy: token on out but no TON leg -> usd 0, priced from market data later
+    jout = {"address": TOKEN_RAW, "symbol": "SHROOM", "decimals": 9}
+    trades = parse_pool_events([_pool_event(jout=jout, ton_in=0)], POOL2, ton_usd=5.0)
+    assert len(trades) == 1 and trades[0].usd == 0.0
 
 
 def test_tonapi_skips_failed_and_jetton_to_jetton():

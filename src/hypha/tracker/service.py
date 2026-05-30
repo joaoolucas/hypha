@@ -15,7 +15,7 @@ import structlog
 
 from ..analysis.discovery import hot_pools
 from ..analysis.service import analyze_token
-from ..analysis.trades import parse_gecko_trades, parse_tonapi_events
+from ..analysis.trades import parse_pool_events, parse_tonapi_events
 from ..bot.channel import publish_alert, render_alert
 from ..config import Settings
 from ..connectors.geckoterminal import GeckoTerminal
@@ -97,33 +97,47 @@ async def _log_alert(trade: Trade, ctx, report) -> None:
 
 # ── cycles ─────────────────────────────────────────────────────────────────────
 async def discovery_cycle(gecko: GeckoTerminal, s: Settings) -> int:
+    """Refresh the hot-pool set from Gecko (trending/new). Only a couple of tiny calls every
+    half hour, so the free tier copes. If it comes back empty (throttle), keep the prior set."""
     pools = await hot_pools(gecko, s.hot_pools_max)
-    await state.save_hot_pools(pools)
-    log.info("discovery", pools=len(pools))
+    if pools:
+        await state.save_hot_pools(pools)
+        log.info("discovery", pools=len(pools))
+    else:
+        log.warning("discovery_empty_kept_previous")
     return len(pools)
 
 
 async def trade_cycle(gecko: GeckoTerminal, tonapi: TonAPI, bot, s: Settings) -> None:
+    """Token-centric: read each hot pool's swaps from TonAPI (reliable) and alert on big ones."""
     pools = await state.load_hot_pools()
     if not pools:
         await discovery_cycle(gecko, s)
         pools = await state.load_hot_pools()
-    floor = min(s.buy_alert_usd, s.sell_alert_usd)
+    ton_usd = await _ton_price(tonapi)
     sem = asyncio.Semaphore(s.trade_concurrency)
 
     async def _fresh(pool):
         async with sem:
             try:
-                raw = await gecko.pool_trades(pool.pool_address, floor)
+                events = await tonapi.account_events(pool.pool_address, limit=30)
             except Exception as exc:  # noqa: BLE001
-                log.warning("pool_trades_failed", pool=pool.pool_address, error=str(exc))
+                log.warning("pool_events_failed", pool=pool.pool_address, error=str(exc))
                 return []
-        parsed = parse_gecko_trades(raw, pool, buy_min=s.buy_alert_usd, sell_min=s.sell_alert_usd)
+        parsed = parse_pool_events(events, pool, ton_usd)
         return await state.new_pool_trades(pool.pool_address, parsed)
 
     batches = await asyncio.gather(*(_fresh(p) for p in pools), return_exceptions=True)
     fresh = [t for b in batches if not isinstance(b, BaseException) for t in b]
     await _post_batch(fresh, tonapi, bot, s)
+
+
+async def _ton_price(tonapi: TonAPI) -> float:
+    try:
+        return await tonapi.ton_usd()
+    except Exception as exc:  # noqa: BLE001 — sizing falls back to token price if this fails
+        log.warning("ton_price_failed", error=str(exc))
+        return 0.0
 
 
 async def follow_cycle(gecko: GeckoTerminal, tonapi: TonAPI, bot, s: Settings) -> None:

@@ -1,12 +1,14 @@
-"""Swap classification — the heart of "tal whale comprou tal memecoin".
+"""Swap classification — the heart of "this whale bought this memecoin".
 
-Two sources feed the same normalized `Trade`:
-  • GeckoTerminal pool trades  → token-centric loop (any big buyer on a hot pool)
-  • TonAPI account events       → wallet-centric loop (a followed whale, even on cold tokens)
+All three feeds produce the same normalized `Trade`:
+  • TonAPI pool events    → token-centric loop (any big buyer on a hot pool)   [primary]
+  • TonAPI account events → wallet-centric loop (a followed whale, cold tokens too)
+  • GeckoTerminal trades  → legacy/alt path, kept for completeness
 
-Both are pure transforms (no I/O) so they're unit-tested against fixtures. USD sizing on the
-Gecko path comes straight from the feed; the TonAPI path leaves `usd` 0 to be priced at enrich
-time (events carry amounts, not USD).
+We read trades from TonAPI (reliable, paid tier) rather than GeckoTerminal's free tier, which
+hard-throttles server-side polling. Gecko is used only for hot-pool discovery now. All parsers
+are pure transforms (no I/O) so they're unit-tested. TonAPI events carry no USD, so swaps are
+sized by their TON leg (TON amount × TON/USD), with token-price as a later fallback.
 """
 
 from __future__ import annotations
@@ -84,6 +86,55 @@ def parse_gecko_trades(
             ts=_parse_ts(a.get("block_timestamp")),
             source="gecko",
         ))
+    return out
+
+
+_NANOTON = 10 ** 9
+
+
+def parse_pool_events(events: list[dict], pool, ton_usd: float = 0.0) -> list[Trade]:
+    """Token-centric feed: pull buys/sells of a pool's memecoin out of the pool's TonAPI events.
+    The trader is each swap's own `user_wallet` (not the queried account). Direction is read from
+    which side of the swap carries the pool's token. Sized by the TON leg (× ton_usd); jetton/jetton
+    or pTON-paired swaps leave usd 0 to be priced from the token's market data later."""
+    token_raw = to_raw(pool.token_address)
+    out: list[Trade] = []
+    for ev in events:
+        ts = float(ev.get("timestamp", 0) or 0)
+        event_id = ev.get("event_id", "")
+        for act in ev.get("actions", []) or []:
+            if act.get("type") != "JettonSwap" or act.get("status") == "failed":
+                continue
+            sw = act.get("JettonSwap") or {}
+            jm_in, jm_out = sw.get("jetton_master_in") or {}, sw.get("jetton_master_out") or {}
+
+            if to_raw(jm_out.get("address", "")) == token_raw:
+                side, master, amount_units, ton_leg = (
+                    TradeSide.BUY, jm_out, sw.get("amount_out"), _f(sw.get("ton_in")))
+            elif to_raw(jm_in.get("address", "")) == token_raw:
+                side, master, amount_units, ton_leg = (
+                    TradeSide.SELL, jm_in, sw.get("amount_in"), _f(sw.get("ton_out")))
+            else:
+                continue                              # swap doesn't involve this pool's token
+
+            try:
+                decimals = int(master.get("decimals", 9) or 9)
+            except (TypeError, ValueError):
+                decimals = 9
+            usd = round(ton_leg / _NANOTON * ton_usd, 2) if (ton_leg and ton_usd) else 0.0
+            out.append(Trade(
+                side=side,
+                token_address=pool.token_address,
+                token_symbol=pool.token_symbol or master.get("symbol", ""),
+                trader=to_raw((sw.get("user_wallet") or {}).get("address", "")),
+                usd=usd,
+                token_amount=_f(amount_units) / (10 ** decimals),
+                venue=sw.get("dex", "") or pool.venue,
+                pool_address=pool.pool_address,
+                tx_hash=event_id,
+                ts=ts,
+                source="tonapi",
+            ))
     return out
 
 

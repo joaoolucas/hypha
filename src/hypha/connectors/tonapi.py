@@ -104,3 +104,19 @@ class TonAPI(BaseConnector):
             params={"limit": min(limit, 100)},
         )
         return d.get("events", []) or []
+
+    async def ton_usd(self) -> float:
+        """Current TON/USD price — used to size swaps by their TON leg (cached briefly)."""
+        d = await self.get(
+            "/v2/rates",
+            params={"tokens": "ton", "currencies": "usd"},
+            cache_key="ta:rate:ton",
+            ttl=60,
+        )
+        rates = d.get("rates") or {}
+        ton = rates.get("TON") or rates.get("ton") or {}
+        price = (ton.get("prices") or {}).get("USD")
+        try:
+            return float(price) if price is not None else 0.0
+        except (TypeError, ValueError):
+            return 0.0
