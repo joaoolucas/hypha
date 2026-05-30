@@ -144,6 +144,7 @@ class Settings(BaseSettings):
     promote_min_buys: int = 3          # qualifying big buys before a wallet is auto-followed
     promote_window_secs: int = 604_800 # window for counting a wallet's qualifying buys (7d)
     alert_dedup_ttl: int = 86_400      # don't repost the same op within this window
+    trade_max_age_secs: int = 900      # ignore trades older than this (avoids restart-backlog floods)
 
     score: ScoreConfig = Field(default_factory=ScoreConfig)
 

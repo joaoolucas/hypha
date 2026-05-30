@@ -10,6 +10,7 @@ handle_trade is the shared funnel: dedup → enrich → price → posting policy
 from __future__ import annotations
 
 import asyncio
+import time
 
 import structlog
 
@@ -129,6 +130,8 @@ async def trade_cycle(gecko: GeckoTerminal, tonapi: TonAPI, bot, s: Settings) ->
 
     batches = await asyncio.gather(*(_fresh(p) for p in pools), return_exceptions=True)
     fresh = [t for b in batches if not isinstance(b, BaseException) for t in b]
+    log.info("trade_cycle", pools=len(pools), fresh=len(fresh),
+             max_usd=round(max((t.usd for t in fresh), default=0.0)))
     await _post_batch(fresh, tonapi, bot, s)
 
 
@@ -162,12 +165,19 @@ async def follow_cycle(gecko: GeckoTerminal, tonapi: TonAPI, bot, s: Settings) -
 
 
 async def _post_batch(trades: list[Trade], tonapi: TonAPI, bot, s: Settings) -> None:
-    trades.sort(key=lambda t: t.ts)          # oldest first, chronological in the channel
-    if len(trades) > _MAX_POSTS_PER_CYCLE:
-        log.warning("post_cap_hit", found=len(trades), cap=_MAX_POSTS_PER_CYCLE,
-                    dropped=len(trades) - _MAX_POSTS_PER_CYCLE)
-        trades = trades[-_MAX_POSTS_PER_CYCLE:]   # keep the most recent
-    for tr in trades:
+    now = time.time()
+    floor = min(s.buy_alert_usd, s.sell_alert_usd)
+    # Only timely, plausibly-sized trades: drop the restart backlog (stale ts) and clear obvious
+    # sub-threshold noise before the flood cap. usd==0 means unpriced (no TON leg) — keep it so
+    # handle_trade can price it from market data.
+    cands = [t for t in trades
+             if (now - t.ts) <= s.trade_max_age_secs and (t.usd == 0 or t.usd >= floor)]
+    if len(cands) > _MAX_POSTS_PER_CYCLE:
+        log.warning("post_cap_hit", found=len(cands), cap=_MAX_POSTS_PER_CYCLE,
+                    dropped=len(cands) - _MAX_POSTS_PER_CYCLE)
+        cands = sorted(cands, key=lambda t: t.usd, reverse=True)[:_MAX_POSTS_PER_CYCLE]  # keep biggest
+    cands.sort(key=lambda t: t.ts)               # oldest first, chronological in the channel
+    for tr in cands:
         try:
             if await handle_trade(tr, tonapi, bot, s):
                 await asyncio.sleep(1.1)          # stay under Telegram's channel post rate
