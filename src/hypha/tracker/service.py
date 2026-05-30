@@ -32,9 +32,9 @@ log = structlog.get_logger(__name__)
 _MAX_POSTS_PER_CYCLE = 15        # flood guard; drops beyond this are logged, never silent
 
 
-def _should_post(trade: Trade, ctx, s: Settings) -> bool:
+def _should_post(trade: Trade, ctx, s: Settings, buy_floor_usd: float) -> bool:
     if trade.side == TradeSide.BUY:
-        return trade.usd >= s.buy_alert_usd or ctx.is_followed
+        return trade.usd >= buy_floor_usd or ctx.is_followed
     return trade.usd >= s.sell_alert_usd
 
 
@@ -47,8 +47,11 @@ async def _price_in_usd(trade: Trade, report) -> float:
     return 0.0
 
 
-async def handle_trade(trade: Trade, tonapi: TonAPI, bot, s: Settings) -> bool:
-    """Process one detected swap. Returns True if it was posted."""
+async def handle_trade(trade: Trade, tonapi: TonAPI, bot, s: Settings,
+                       buy_floor_usd: float | None = None) -> bool:
+    """Process one detected swap. Returns True if it was posted. `buy_floor_usd` is the effective
+    USD buy threshold (TON-denominated, converted at the current TON price); falls back to config."""
+    floor = buy_floor_usd if buy_floor_usd is not None else s.buy_alert_usd
     if not trade.token_address or not await state.is_new_op(trade, s.alert_dedup_ttl):
         return False
 
@@ -56,12 +59,12 @@ async def handle_trade(trade: Trade, tonapi: TonAPI, bot, s: Settings) -> bool:
     trade.usd = await _price_in_usd(trade, report)
     ctx = await enrich_trader(trade.trader, tonapi, s)
 
-    if not _should_post(trade, ctx, s):
+    if not _should_post(trade, ctx, s, floor):
         return False
 
     # auto-promotion: a real, sized buy by a real wallet counts toward the followed list
     promoted = False
-    if trade.side == TradeSide.BUY and trade.usd >= s.buy_alert_usd and not ctx.excluded:
+    if trade.side == TradeSide.BUY and trade.usd >= floor and not ctx.excluded:
         ctx.big_buys = await state.record_big_buy(trade.trader, s.promote_window_secs)
         if (s.follow_enabled and not ctx.is_followed
                 and ctx.big_buys >= s.promote_min_buys
@@ -116,6 +119,7 @@ async def trade_cycle(gecko: GeckoTerminal, tonapi: TonAPI, bot, s: Settings) ->
         await discovery_cycle(gecko, s)
         pools = await state.load_hot_pools()
     ton_usd = await _ton_price(tonapi)
+    buy_floor = _buy_floor(s, ton_usd)
     sem = asyncio.Semaphore(s.trade_concurrency)
 
     async def _fresh(pool):
@@ -131,8 +135,13 @@ async def trade_cycle(gecko: GeckoTerminal, tonapi: TonAPI, bot, s: Settings) ->
     batches = await asyncio.gather(*(_fresh(p) for p in pools), return_exceptions=True)
     fresh = [t for b in batches if not isinstance(b, BaseException) for t in b]
     log.info("trade_cycle", pools=len(pools), fresh=len(fresh),
-             max_usd=round(max((t.usd for t in fresh), default=0.0)))
-    await _post_batch(fresh, tonapi, bot, s)
+             max_usd=round(max((t.usd for t in fresh), default=0.0)), buy_floor=round(buy_floor))
+    await _post_batch(fresh, tonapi, bot, s, buy_floor)
+
+
+def _buy_floor(s: Settings, ton_usd: float) -> float:
+    """Effective USD buy threshold: the TON-denominated floor priced at the current TON rate."""
+    return s.buy_alert_ton * ton_usd if ton_usd > 0 else s.buy_alert_usd
 
 
 async def _ton_price(tonapi: TonAPI) -> float:
@@ -147,6 +156,7 @@ async def follow_cycle(gecko: GeckoTerminal, tonapi: TonAPI, bot, s: Settings) -
     wallets = (await state.followed_list())[: s.followed_max]
     if not wallets:
         return
+    buy_floor = _buy_floor(s, await _ton_price(tonapi))
     sem = asyncio.Semaphore(s.trade_concurrency)
 
     async def _fresh(wallet):
@@ -161,12 +171,13 @@ async def follow_cycle(gecko: GeckoTerminal, tonapi: TonAPI, bot, s: Settings) -
 
     batches = await asyncio.gather(*(_fresh(w) for w in wallets), return_exceptions=True)
     fresh = [t for b in batches if not isinstance(b, BaseException) for t in b]
-    await _post_batch(fresh, tonapi, bot, s)
+    await _post_batch(fresh, tonapi, bot, s, buy_floor)
 
 
-async def _post_batch(trades: list[Trade], tonapi: TonAPI, bot, s: Settings) -> None:
+async def _post_batch(trades: list[Trade], tonapi: TonAPI, bot, s: Settings,
+                      buy_floor_usd: float) -> None:
     now = time.time()
-    floor = min(s.buy_alert_usd, s.sell_alert_usd)
+    floor = min(buy_floor_usd, s.sell_alert_usd)
     # Only timely, plausibly-sized trades: drop the restart backlog (stale ts) and clear obvious
     # sub-threshold noise before the flood cap. usd==0 means unpriced (no TON leg) — keep it so
     # handle_trade can price it from market data.
@@ -179,7 +190,7 @@ async def _post_batch(trades: list[Trade], tonapi: TonAPI, bot, s: Settings) -> 
     cands.sort(key=lambda t: t.ts)               # oldest first, chronological in the channel
     for tr in cands:
         try:
-            if await handle_trade(tr, tonapi, bot, s):
+            if await handle_trade(tr, tonapi, bot, s, buy_floor_usd):
                 await asyncio.sleep(1.1)          # stay under Telegram's channel post rate
         except Exception:  # noqa: BLE001
             log.exception("handle_trade_failed", token=tr.token_address)

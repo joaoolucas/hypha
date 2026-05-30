@@ -116,6 +116,20 @@ async def test_followed_buy_posts_regardless_of_size(captured, monkeypatch):
     assert await service.handle_trade(tr, None, None, _settings()) is True
 
 
+def test_buy_floor_ton_denominated():
+    s = _settings(buy_alert_ton=100, buy_alert_usd=300)
+    assert service._buy_floor(s, 4.0) == 400.0    # 100 TON × $4
+    assert service._buy_floor(s, 0.0) == 300.0     # no TON price -> USD fallback
+
+
+async def test_handle_respects_explicit_buy_floor(captured, monkeypatch):
+    _patch_enrich(monkeypatch)                     # unknown trader, not followed
+    below = _trade(usd=350, trader="0:fl1", token="EQfl1", tx="fl1")
+    assert await service.handle_trade(below, None, None, _settings(), buy_floor_usd=400) is False
+    above = _trade(usd=450, trader="0:fl2", token="EQfl2", tx="fl2")
+    assert await service.handle_trade(above, None, None, _settings(), buy_floor_usd=400) is True
+
+
 async def test_recurring_buyer_auto_promoted(captured, monkeypatch):
     _patch_enrich(monkeypatch)                              # arrives unknown
     s = _settings(promote_min_buys=1)
