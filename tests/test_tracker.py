@@ -92,7 +92,7 @@ async def test_big_buy_posts(captured, monkeypatch):
     _patch_enrich(monkeypatch, is_whale=True, portfolio_usd=180_000)
     tr = _trade(usd=4200, trader="0:b1", token="EQb1", tx="b1")
     assert await service.handle_trade(tr, None, None, _settings()) is True
-    assert "Whale bought" in captured[0]
+    assert "Whale buy" in captured[0]
 
 
 async def test_small_buy_not_posted(captured, monkeypatch):
@@ -140,10 +140,20 @@ async def test_recurring_buyer_auto_promoted(captured, monkeypatch):
 
 
 # ── rendering ───────────────────────────────────────────────────────────────────
+def test_render_buy_shows_ton_size():
+    tr = Trade(side=TradeSide.BUY, token_address="EQd", token_symbol="DUROVIUS",
+               trader="0:b", usd=285, ton_value=100.0)
+    text, kb = render_alert(tr, TraderContext(address="0:b"), _report("DUROVIUS"))
+    assert "🟢 <b>Big buy · 100 TON ($285) · $DUROVIUS</b>" in text
+    assert "Hypha" not in text                          # score block removed
+    assert "Top10" not in text and "LP" not in text     # holder flags removed
+    assert kb is not None and kb.inline_keyboard
+
+
 def test_render_sell_whale_card():
     tr = _trade(side=TradeSide.SELL, usd=14000, token="EQt", trader="0:w")
     ctx = TraderContext(address="0:w", is_whale=True, portfolio_usd=200_000)
     text, kb = render_alert(tr, ctx, _report("CAT"))
-    assert "dumped" in text and "$14.0k" in text
-    assert "Hypha 72/100" in text
+    assert "Whale sell" in text and "$14.0k" in text
+    assert "Hypha" not in text
     assert kb is not None and kb.inline_keyboard       # at least the Chart button

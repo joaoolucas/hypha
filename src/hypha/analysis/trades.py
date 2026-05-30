@@ -121,13 +121,15 @@ def parse_pool_events(events: list[dict], pool, ton_usd: float = 0.0) -> list[Tr
                 decimals = int(master.get("decimals", 9) or 9)
             except (TypeError, ValueError):
                 decimals = 9
-            usd = round(ton_leg / _NANOTON * ton_usd, 2) if (ton_leg and ton_usd) else 0.0
+            ton_value = ton_leg / _NANOTON
+            usd = round(ton_value * ton_usd, 2) if (ton_leg and ton_usd) else 0.0
             out.append(Trade(
                 side=side,
                 token_address=pool.token_address,
                 token_symbol=pool.token_symbol or master.get("symbol", ""),
                 trader=to_raw((sw.get("user_wallet") or {}).get("address", "")),
                 usd=usd,
+                ton_value=round(ton_value, 2),
                 token_amount=_f(amount_units) / (10 ** decimals),
                 venue=sw.get("dex", "") or pool.venue,
                 pool_address=pool.pool_address,
@@ -172,12 +174,14 @@ def parse_tonapi_events(events: list[dict], wallet_raw: str) -> list[Trade]:
                 decimals = int(master.get("decimals", 9) or 9)
             except (TypeError, ValueError):
                 decimals = 9
+            ton_leg = ton_in if side == TradeSide.BUY else ton_out
             out.append(Trade(
                 side=side,
                 token_address=master.get("address", ""),
                 token_symbol=master.get("symbol", ""),
                 trader=wallet_raw,
                 usd=0.0,                                       # priced at enrich time
+                ton_value=round(ton_leg / _NANOTON, 2),
                 token_amount=_f(amount_units) / (10 ** decimals),
                 venue=sw.get("dex", ""),
                 tx_hash=event_id,

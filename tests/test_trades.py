@@ -110,6 +110,7 @@ def test_pool_event_buy_sized_by_ton_leg():
     t = trades[0]
     assert t.side == TradeSide.BUY
     assert t.usd == 10.0                     # 2 TON × $5
+    assert t.ton_value == 2.0                # the TON leg, shown in the headline
     assert t.token_amount == 5.0             # amount_out 5e9 / 1e9
     assert t.trader == "0:" + "bb" * 32      # from user_wallet, not the queried pool
     assert t.token_symbol == "SHROOM"

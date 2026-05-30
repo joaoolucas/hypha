@@ -173,6 +173,7 @@ class Trade(BaseModel):
     token_symbol: str = ""
     trader: str                        # raw `0:hex` address of the wallet that traded
     usd: float = 0.0                   # USD size of the trade (0 if unknown until enriched)
+    ton_value: float = 0.0             # size of the trade in TON (the TON leg); 0 if not TON-paired
     token_amount: float = 0.0          # memecoin amount bought/sold
     price_usd: float | None = None
     venue: str = ""

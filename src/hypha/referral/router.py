@@ -62,14 +62,14 @@ def build_buy(report: TokenReport) -> dict | None:
         url = _launchpad_url(lp.launchpad, jetton)
         if url:
             venue = lp.launchpad or "launchpad"
-            return {"label": f"Buy on {lp.launchpad} 🍄", "url": _wrap_tracked(url, jetton, venue), "venue": venue}
+            return {"label": f"🛒 Buy on {lp.launchpad}", "url": _wrap_tracked(url, jetton, venue), "venue": venue}
 
     if not dex or not dex.has_pool:
         return None
 
     # STON.fi referral is the strongest direct link when a STON.fi pool exists.
     if "stonfi" in (dex.venues or []) and get_settings().stonfi_referral_address:
-        return {"label": "Buy 🍄", "url": _wrap_tracked(_stonfi_url(jetton), jetton, "stonfi"), "venue": "stonfi"}
+        return {"label": "🛒 Buy", "url": _wrap_tracked(_stonfi_url(jetton), jetton, "stonfi"), "venue": "stonfi"}
 
     # Otherwise aggregate for best price via swap.coffee.
-    return {"label": "Buy 🍄", "url": _wrap_tracked(_swapcoffee_url(jetton), jetton, "swapcoffee"), "venue": "swapcoffee"}
+    return {"label": "🛒 Buy", "url": _wrap_tracked(_swapcoffee_url(jetton), jetton, "swapcoffee"), "venue": "swapcoffee"}
