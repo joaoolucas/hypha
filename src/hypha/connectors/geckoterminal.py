@@ -26,7 +26,12 @@ class GeckoTerminal(BaseConnector):
     name = "geckoterminal"
 
     def __init__(self) -> None:
-        super().__init__(get_settings().geckoterminal_base, headers={"Accept": "application/json"})
+        s = get_settings()
+        super().__init__(
+            s.geckoterminal_base,
+            headers={"Accept": "application/json"},
+            min_interval=s.gecko_min_interval,
+        )
 
     async def token_market(self, addr: str) -> dict:
         """Return {price_usd, fdv_usd, market_cap_usd, liquidity_usd, volume24h_usd}."""
