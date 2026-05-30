@@ -145,6 +145,56 @@ class PortfolioReport(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+# ── Whale-tracker (the alerts channel) ─────────────────────────────────────────
+class HotPool(BaseModel):
+    """A DEX pool we watch for big trades. Discovered from GeckoTerminal trending/new feeds."""
+
+    pool_address: str
+    token_address: str                 # the memecoin side (what a "buy" is buying)
+    token_symbol: str = ""
+    quote_symbol: str = ""             # the paired asset (TON / USDT / …)
+    token_is_base: bool = True         # is the memecoin the pool's base token?
+    venue: str = ""                    # stonfi | dedust | …
+    reserve_usd: float = 0.0
+    volume24h_usd: float = 0.0
+    reason: str = ""                   # "trending" | "new"
+
+
+class TradeSide(str, Enum):
+    BUY = "buy"
+    SELL = "sell"
+
+
+class Trade(BaseModel):
+    """A normalized DEX swap on a watched token — the raw event behind an alert."""
+
+    side: TradeSide
+    token_address: str                 # jetton master of the memecoin traded
+    token_symbol: str = ""
+    trader: str                        # raw `0:hex` address of the wallet that traded
+    usd: float = 0.0                   # USD size of the trade (0 if unknown until enriched)
+    token_amount: float = 0.0          # memecoin amount bought/sold
+    price_usd: float | None = None
+    venue: str = ""
+    pool_address: str = ""
+    tx_hash: str = ""
+    ts: float = 0.0                    # epoch seconds (block time)
+    source: str = "gecko"              # gecko | tonapi
+
+
+class TraderContext(BaseModel):
+    """Who the trader is — built lazily to tag an alert (🐋 whale / 👣 followed)."""
+
+    address: str                       # raw form
+    portfolio_usd: float = 0.0
+    is_whale: bool = False             # portfolio clears the whale threshold
+    is_followed: bool = False          # on our premium auto-followed list
+    excluded: bool = False             # router / pool / burn — not a real trader
+    label: str | None = None
+    big_buys: int = 0                  # qualifying buys counted toward promotion
+    top_bags: list[dict] = Field(default_factory=list)   # [{symbol, usd}]
+
+
 # ── Score ─────────────────────────────────────────────────────────────────────
 class PillarScore(BaseModel):
     key: str

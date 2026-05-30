@@ -1,7 +1,11 @@
-"""GeckoTerminal — price, FDV, market cap, liquidity and volume for a TON token.
+"""GeckoTerminal — price, FDV, market cap, liquidity and volume for a TON token, plus the
+trending/new pool feeds and per-pool trade stream that power the whale-tracker channel.
 
   GET /networks/ton/tokens/{addr}             token market data + top pools
   GET /networks/ton/tokens/{addr}/pools       pools for the token
+  GET /networks/ton/trending_pools            hottest pools (discovery seed)
+  GET /networks/ton/new_pools                 freshest pools (discovery seed)
+  GET /networks/ton/pools/{pool}/trades       recent swaps for a pool (the alert feed)
 ~30 req/min unauthenticated, so responses are cached.
 """
 
@@ -46,4 +50,33 @@ class GeckoTerminal(BaseConnector):
             cache_key=f"gt:pools:{addr}",
             ttl=120,
         )
+        return d.get("data", []) or []
+
+    async def trending_pools(self) -> list[dict]:
+        """Hottest TON pools (by recent volume/movement). Discovery seed for the tracker."""
+        d = await self.get(
+            "/networks/ton/trending_pools",
+            params={"duration": "1h"},
+            cache_key="gt:trending:ton",
+            ttl=300,
+        )
+        return d.get("data", []) or []
+
+    async def new_pools(self) -> list[dict]:
+        """Freshest TON pools — where early whale entries show up first."""
+        d = await self.get(
+            "/networks/ton/new_pools",
+            cache_key="gt:new:ton",
+            ttl=300,
+        )
+        return d.get("data", []) or []
+
+    async def pool_trades(self, pool_address: str, min_usd: float = 0.0) -> list[dict]:
+        """Recent swaps for a pool (last 24h, newest first). `min_usd` pushes the size filter
+        server-side so we only pull trades large enough to possibly alert on. Not cached —
+        the poller wants fresh trades each cycle."""
+        params: dict = {}
+        if min_usd > 0:
+            params["trade_volume_in_usd_greater_than"] = min_usd
+        d = await self.get(f"/networks/ton/pools/{pool_address}/trades", params=params)
         return d.get("data", []) or []

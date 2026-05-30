@@ -121,7 +121,40 @@ class Settings(BaseSettings):
     whales_dust_usd: float = 1_000.0   # drop near-worthless shared bags (spam airdrops) below this
     whales_concurrency: int = 6        # cap concurrent portfolio calls to avoid 429s
 
+    # ── Whale-tracker alerts channel (the pivot: push whale ops to a channel) ──
+    alerts_channel_id: str = ""        # @handle or -100… numeric id the bot posts alerts to
+    alerts_enabled: bool = True        # master switch for the token-centric trade poller
+    admin_ids: str = ""                # comma/space-separated tg user ids allowed to /track
+
+    buy_alert_usd: float = 1_000.0     # post a BUY at/above this USD size
+    sell_alert_usd: float = 10_000.0   # post a SELL only at/above this (big dumps)
+    whale_portfolio_usd: float = 50_000.0   # buyer tagged 🐋 at/above this total portfolio USD
+
+    # Token-centric discovery (watch the hottest pools' trade feeds)
+    hot_pools_max: int = 30            # how many hot pools to watch for trades
+    trades_poll_secs: int = 150        # trade-poll cycle interval (seconds)
+    discovery_poll_secs: int = 1_800   # how often the hot-pool set is refreshed
+    trade_concurrency: int = 6         # cap concurrent Gecko trade-feed calls
+
+    # Wallet-centric follow (Phase 3: auto-promote recurring big buyers, track them everywhere)
+    follow_enabled: bool = True        # follow promoted whales into cold (non-trending) tokens
+    follow_poll_secs: int = 180        # followed-wallet poll interval (seconds)
+    followed_max: int = 150            # cap on followed wallets (RPS bound)
+    promote_min_buys: int = 3          # qualifying big buys before a wallet is auto-followed
+    promote_window_secs: int = 604_800 # window for counting a wallet's qualifying buys (7d)
+    alert_dedup_ttl: int = 86_400      # don't repost the same op within this window
+
     score: ScoreConfig = Field(default_factory=ScoreConfig)
+
+    @property
+    def admin_id_set(self) -> set[int]:
+        out: set[int] = set()
+        for part in self.admin_ids.replace(",", " ").split():
+            try:
+                out.add(int(part))
+            except ValueError:
+                continue
+        return out
 
 
 @lru_cache

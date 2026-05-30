@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Float, Integer, String, Text, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, Integer, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -49,4 +49,22 @@ class ScoreHistory(Base):
     score: Mapped[int] = mapped_column(Integer)
     raw: Mapped[float] = mapped_column(Float)
     tier: Mapped[str] = mapped_column(String(32))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Alert(Base):
+    """Posted whale-alert log — the substrate for calibration & win-rate (did the token run
+    after a whale bought?). Write-only from the poller; analysed later by a scoring cron."""
+
+    __tablename__ = "alerts"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    side: Mapped[str] = mapped_column(String(8))            # buy | sell
+    token: Mapped[str] = mapped_column(String(72), index=True)
+    symbol: Mapped[str] = mapped_column(String(32), default="")
+    trader: Mapped[str] = mapped_column(String(72), index=True)
+    usd: Mapped[float] = mapped_column(Float, default=0.0)
+    price_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    hypha_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_whale: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_followed: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

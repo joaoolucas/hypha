@@ -36,6 +36,22 @@ def to_friendly(addr: str, *, bounceable: bool = False) -> str:
     return base64.urlsafe_b64encode(payload + _crc16(payload)).decode()
 
 
+def to_raw(addr: str) -> str:
+    """Convert a user-friendly (EQ…/UQ…) address to its raw `workchain:hex` form. Returns the
+    input unchanged if already raw or undecodable. No network call — the inverse of to_friendly,
+    so the same wallet keys identically whether it arrives from Gecko (EQ…) or TonAPI (0:hex)."""
+    if not addr or ":" in addr:
+        return addr
+    try:
+        payload = base64.urlsafe_b64decode(addr)
+    except (ValueError, TypeError):
+        return addr
+    if len(payload) != 36:
+        return addr
+    wc = payload[1] - 256 if payload[1] > 127 else payload[1]
+    return f"{wc}:{payload[2:34].hex()}"
+
+
 def clean_address(text: str) -> str | None:
     """Extract/validate a TON address from arbitrary user text. Returns None if not found."""
     text = (text or "").strip()

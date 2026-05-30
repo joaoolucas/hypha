@@ -13,6 +13,13 @@ services:
     depends_on: [redis, postgres]
     restart: unless-stopped
 
+  tracker:
+    build: .
+    command: python -m hypha.tracker.main
+    env_file: .env
+    depends_on: [redis, postgres]
+    restart: unless-stopped
+
   web:
     build: .
     command: uvicorn hypha.web.redirect:app --host 0.0.0.0 --port 8080

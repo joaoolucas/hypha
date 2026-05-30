@@ -1,4 +1,4 @@
-from hypha.utils import bar, clean_address, fmt_price, fmt_usd, is_ton_address
+from hypha.utils import bar, clean_address, fmt_price, fmt_usd, is_ton_address, to_friendly, to_raw
 
 
 def test_fmt_price():
@@ -38,3 +38,23 @@ def test_bar_bounds():
     assert bar(0) == "░" * 10
     assert bar(100) == "▓" * 10
     assert len(bar(57)) == 10
+
+
+def test_to_raw_roundtrips_to_friendly():
+    raw = "0:" + "ab" * 32
+    # to_friendly(raw) is a UQ…/EQ… address; to_raw must invert it back exactly.
+    assert to_raw(to_friendly(raw)) == raw
+    assert to_raw(to_friendly(raw, bounceable=True)) == raw
+
+
+def test_to_raw_passthrough_and_garbage():
+    raw = "0:" + "cd" * 32
+    assert to_raw(raw) == raw            # already raw -> unchanged
+    assert to_raw("") == ""
+    assert to_raw("not-base64!!") == "not-base64!!"
+
+
+def test_to_raw_matches_known_friendly():
+    a = "EQCcLAW537KnRg_aSPrnQJoyYjOZkzqYp6FVmRUvN1crSazV"
+    raw = to_raw(a)
+    assert raw.startswith("0:") and len(raw) == 66   # workchain 0 + 64 hex chars

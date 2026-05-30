@@ -10,14 +10,22 @@ from aiogram import F, Router
 from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import CallbackQuery, Message
 
-from ..analysis.service import analyze_token, analyze_whales
+from ..analysis.service import analyze_whales
 from ..cache import rate_limit_ok
-from ..utils import clean_address
+from ..config import get_settings
+from ..tracker import state as tracker_state
+from ..utils import clean_address, to_friendly, to_raw
 from . import ui
 from .keyboards import menu_keyboard
 
 log = structlog.get_logger(__name__)
 router = Router()
+
+
+def _is_admin(uid: int) -> bool:
+    """Open when no admins are configured (local dev); gated to admin_ids in production."""
+    admins = get_settings().admin_id_set
+    return not admins or uid in admins
 
 
 async def _guard(message: Message) -> bool:
@@ -58,6 +66,47 @@ async def cmd_start(message: Message) -> None:
 @router.message(Command("analyze", "score", "whales", "portfolio"))
 async def cmd_analyze(message: Message, command: CommandObject) -> None:
     await _show_card(message, command.args)
+
+
+# ── followed-wallet management (admin; feeds the tracker's wallet-centric loop) ──
+@router.message(Command("track"))
+async def cmd_track(message: Message, command: CommandObject) -> None:
+    if not _is_admin(message.from_user.id):
+        await message.answer("🍄 Only admins can manage the followed list.")
+        return
+    addr = clean_address(command.args or "")
+    if not addr:
+        await message.answer("Usage: <code>/track &lt;wallet address&gt;</code>")
+        return
+    raw = to_raw(addr)
+    await tracker_state.add_followed(raw, reason="manual")
+    await message.answer(
+        f"👣 Now following <code>{to_friendly(raw)}</code> — its buys & big sells will hit the channel."
+    )
+
+
+@router.message(Command("untrack"))
+async def cmd_untrack(message: Message, command: CommandObject) -> None:
+    if not _is_admin(message.from_user.id):
+        await message.answer("🍄 Only admins can manage the followed list.")
+        return
+    addr = clean_address(command.args or "")
+    if not addr:
+        await message.answer("Usage: <code>/untrack &lt;wallet address&gt;</code>")
+        return
+    removed = await tracker_state.remove_followed(to_raw(addr))
+    await message.answer("👣 Unfollowed." if removed else "🍄 That wallet wasn't on the list.")
+
+
+@router.message(Command("followed"))
+async def cmd_followed(message: Message) -> None:
+    wallets = await tracker_state.followed_list()
+    if not wallets:
+        await message.answer("🍄 Not following any wallets yet — they're auto-promoted from recurring big buys.")
+        return
+    lines = [f"• <code>{to_friendly(w)}</code>" for w in wallets[:50]]
+    more = f"\n…and {len(wallets) - 50} more" if len(wallets) > 50 else ""
+    await message.answer(f"👣 <b>Followed wallets ({len(wallets)})</b>\n" + "\n".join(lines) + more)
 
 
 @router.message(F.text.func(lambda t: clean_address(t) is not None))
