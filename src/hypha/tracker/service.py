@@ -19,6 +19,7 @@ from ..analysis.service import analyze_token
 from ..analysis.trades import parse_pool_events, parse_tonapi_events
 from ..bot.channel import publish_alert, render_alert
 from ..config import Settings
+from ..connectors.dexscreener import DexScreener
 from ..connectors.geckoterminal import GeckoTerminal
 from ..connectors.tonapi import TonAPI
 from ..db.models import Alert
@@ -110,7 +111,11 @@ async def _log_alert(trade: Trade, ctx, report) -> None:
 async def discovery_cycle(gecko: GeckoTerminal, s: Settings) -> int:
     """Refresh the hot-pool set from Gecko (trending/new). Only a couple of tiny calls every
     half hour, so the free tier copes. If it comes back empty (throttle), keep the prior set."""
-    pools = await hot_pools(gecko, s.hot_pools_max)
+    ds = DexScreener()
+    try:
+        pools = await hot_pools(gecko, s.hot_pools_max, ds)
+    finally:
+        await ds.aclose()
     if pools:
         await state.save_hot_pools(pools)
         log.info("discovery", pools=len(pools))

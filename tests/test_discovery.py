@@ -1,6 +1,8 @@
 """Token-centric discovery — picking the memecoin side of a pool and dropping non-targets."""
 
-from hypha.analysis.discovery import dedupe_pools, hot_pools, is_quote_asset, normalize_pools
+from hypha.analysis.discovery import (
+    dedupe_pools, hot_pools, is_quote_asset, normalize_dexscreener, normalize_pools,
+)
 
 
 def _pool(addr, name, base_id, quote_id, dex="stonfi", reserve="50000", vol="100000"):
@@ -68,6 +70,49 @@ class _FakeGecko:
 
     async def new_pools(self, page=1):
         return self._new if page == 1 else []
+
+
+def _ds_pair(symbol, pair, dex="uranus", base_addr="EQbase", quote_sym="TON", vol=100):
+    return {
+        "chainId": "ton", "dexId": dex, "pairAddress": pair,
+        "baseToken": {"address": base_addr, "symbol": symbol},
+        "quoteToken": {"address": "EQton", "symbol": quote_sym},
+        "volume": {"h24": vol}, "liquidity": {"usd": 5000},
+    }
+
+
+class _FakeDex:
+    def __init__(self, pairs):
+        self._pairs = pairs
+
+    async def search_ton(self, query):
+        return self._pairs
+
+
+def test_normalize_dexscreener_picks_memecoin_and_venue():
+    pools = normalize_dexscreener([_ds_pair("PEPEGRINCH", "EQpair1")])
+    assert len(pools) == 1
+    p = pools[0]
+    assert p.token_symbol == "PEPEGRINCH" and p.pool_address == "EQpair1"
+    assert p.venue == "uranus" and p.quote_symbol == "TON" and p.token_is_base is True
+
+
+def test_normalize_dexscreener_drops_quote_quote():
+    assert normalize_dexscreener([_ds_pair("TON", "EQp", base_addr="EQton", quote_sym="USDT")]) == []
+
+
+async def test_hot_pools_includes_dexscreener_launchpad(monkeypatch):
+    from hypha.analysis import discovery
+    from hypha.config import Settings
+    # enable DexScreener for this test (it's off by default until Uranus detection lands)
+    monkeypatch.setattr(discovery, "get_settings",
+                        lambda: Settings(dexscreener_queries="uranus", hot_pools_max=10, new_pools_reserve=50))
+    top = [_pool("EQbig", "BIG / TON", "EQb", "EQton", vol="9999999")]
+    ds = _FakeDex([_ds_pair("PEPEGRINCH", "EQuranus1", vol=50)])
+    pools = await hot_pools(_FakeGecko(top=top), limit=10, dexscreener=ds)
+    addrs = {p.pool_address for p in pools}
+    assert "EQuranus1" in addrs       # low-volume Uranus pair reserved, not crowded out
+    assert "EQbig" in addrs
 
 
 async def test_hot_pools_reserves_fresh_launches_over_volume():

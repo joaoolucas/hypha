@@ -56,6 +56,19 @@ def _token_rel(pool: dict, side: str) -> str:
     return _addr_from_id(data.get("id", ""))
 
 
+def _pick_token(base_sym: str, base_addr: str, quote_sym: str, quote_addr: str):
+    """Pick the memecoin side of a pair → (token_addr, token_sym, paired_sym, token_is_base).
+    Returns None for pure quote/quote pairs (TON/USDT) or when the token address is missing."""
+    base_q, quote_q = is_quote_asset(base_sym), is_quote_asset(quote_sym)
+    if base_q and quote_q:
+        return None
+    if base_q and not quote_q:                      # rare: memecoin is the quote side
+        token_addr, token_sym, paired, is_base = quote_addr, quote_sym, base_sym, False
+    else:
+        token_addr, token_sym, paired, is_base = base_addr, base_sym, quote_sym, True
+    return (token_addr, token_sym, paired, is_base) if token_addr else None
+
+
 def normalize_pools(raw_pools: list[dict], reason: str) -> list[HotPool]:
     """Map raw Gecko pool objects to HotPools, picking the memecoin side. Drops pure
     quote/quote pairs (TON/USDT) where there's nothing to track."""
@@ -69,19 +82,11 @@ def normalize_pools(raw_pools: list[dict], reason: str) -> list[HotPool]:
         parts = [clean_symbol(s) for s in str(a.get("name", "")).split("/")]
         base_sym = parts[0] if parts else ""
         quote_sym = parts[1] if len(parts) > 1 else ""
-        base_addr = _token_rel(p, "base_token")
-        quote_addr = _token_rel(p, "quote_token")
-
-        base_is_quote = is_quote_asset(base_sym)
-        quote_is_quote = is_quote_asset(quote_sym)
-        if base_is_quote and quote_is_quote:
-            continue                                  # TON/USDT etc — no memecoin
-        if base_is_quote and not quote_is_quote:      # rare: memecoin is the quote side
-            token_addr, token_sym, paired, token_is_base = quote_addr, quote_sym, base_sym, False
-        else:
-            token_addr, token_sym, paired, token_is_base = base_addr, base_sym, quote_sym, True
-        if not token_addr:
+        picked = _pick_token(base_sym, _token_rel(p, "base_token"),
+                             quote_sym, _token_rel(p, "quote_token"))
+        if not picked:
             continue
+        token_addr, token_sym, paired, token_is_base = picked
 
         out.append(HotPool(
             pool_address=pool_addr,
@@ -92,6 +97,37 @@ def normalize_pools(raw_pools: list[dict], reason: str) -> list[HotPool]:
             venue=_norm_venue((((p.get("relationships") or {}).get("dex") or {}).get("data") or {}).get("id", "")),
             reserve_usd=_f(a.get("reserve_in_usd")),
             volume24h_usd=_f((a.get("volume_usd") or {}).get("h24")),
+            reason=reason,
+        ))
+    return out
+
+
+def normalize_dexscreener(pairs: list[dict], reason: str = "dexscreener") -> list[HotPool]:
+    """Map DexScreener search pairs (TON) to HotPools — same memecoin-side logic, different shape.
+    Surfaces launchpad DEXes Gecko misses (e.g. dexId 'uranus')."""
+    out: list[HotPool] = []
+    for p in pairs:
+        pool_addr = p.get("pairAddress")
+        if not pool_addr:
+            continue
+        base = p.get("baseToken") or {}
+        quote = p.get("quoteToken") or {}
+        picked = _pick_token(
+            clean_symbol(base.get("symbol", "")), base.get("address", ""),
+            clean_symbol(quote.get("symbol", "")), quote.get("address", ""),
+        )
+        if not picked:
+            continue
+        token_addr, token_sym, paired, token_is_base = picked
+        out.append(HotPool(
+            pool_address=pool_addr,
+            token_address=token_addr,
+            token_symbol=token_sym,
+            quote_symbol=paired,
+            token_is_base=token_is_base,
+            venue=_norm_venue(p.get("dexId", "")),
+            reserve_usd=_f((p.get("liquidity") or {}).get("usd")),
+            volume24h_usd=_f((p.get("volume") or {}).get("h24")),
             reason=reason,
         ))
     return out
@@ -123,23 +159,36 @@ async def _gather(feeds: list[tuple]) -> list[HotPool]:
     return out
 
 
-async def hot_pools(gecko: GeckoTerminal, limit: int | None = None) -> list[HotPool]:
-    """Build the watch set from two signals, so fresh launches aren't crowded out by volume:
-      • freshest launches (new-pools feed, recency order) — reserved slots regardless of volume
-      • most actively traded (top-volume + trending) — fills the rest, sorted by volume
-    StonksLabs and other launchpads that trade on a DEX from launch surface in the new feed."""
+async def hot_pools(gecko: GeckoTerminal, limit: int | None = None, dexscreener=None) -> list[HotPool]:
+    """Build the watch set so fresh/launchpad tokens aren't crowded out by volume:
+      • DexScreener launchpad pairs (e.g. Uranus) + freshest Gecko launches — reserved, kept
+        regardless of volume
+      • most actively traded (Gecko top-volume + trending) — fills the rest, sorted by volume
+    StonksLabs (trades on DeDust from launch) shows up in the Gecko new feed; Uranus comes via
+    DexScreener, which Gecko doesn't index."""
     s = get_settings()
     cap = limit if limit is not None else s.hot_pools_max
     reserve = min(s.new_pools_reserve, cap)
 
+    ds_pools: list[HotPool] = []
+    if dexscreener is not None:
+        for q in s.dexscreener_query_list:
+            try:
+                ds_pools += normalize_dexscreener(await dexscreener.search_ton(q))
+            except Exception as exc:  # noqa: BLE001 — a failed search shouldn't sink discovery
+                log.warning("dexscreener_search_failed", query=q, error=str(exc))
+    ds_pools = _dedupe(ds_pools)
+
     fresh = _dedupe(await _gather([
         (gecko.new_pools(1), "new"), (gecko.new_pools(2), "new"), (gecko.new_pools(3), "new"),
-    ]))[:reserve]
-    seen = {p.pool_address for p in fresh}
+    ]))
+    # reserve = all launchpad pairs + freshest launches up to the reserve budget
+    priority = _dedupe(ds_pools + fresh)[: max(reserve, len(ds_pools))]
+    seen = {p.pool_address for p in priority}
 
     volume = await _gather([
         (gecko.top_pools(1), "top"), (gecko.top_pools(2), "top"),
         (gecko.trending_pools(1), "trending"), (gecko.trending_pools(2), "trending"),
     ])
     by_volume = [p for p in dedupe_pools(volume, cap) if p.pool_address not in seen]
-    return (fresh + by_volume)[:cap]
+    return (priority + by_volume)[:cap]

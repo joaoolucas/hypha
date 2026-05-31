@@ -98,6 +98,23 @@ async def cmd_untrack(message: Message, command: CommandObject) -> None:
     await message.answer("👣 Unfollowed." if removed else "🍄 That wallet wasn't on the list.")
 
 
+@router.message(Command("emojiid"))
+async def cmd_emojiid(message: Message) -> None:
+    """Reply with the custom_emoji_id of any custom emoji in the message — so we can wire the
+    real branded venue emoji into alerts. Send: /emojiid <custom emoji> (needs Telegram Premium)."""
+    if not _is_admin(message.from_user.id):
+        return
+    ents = list(message.entities or []) + list(message.caption_entities or [])
+    ids = [e.custom_emoji_id for e in ents if e.type == "custom_emoji"]
+    if not ids:
+        await message.answer(
+            "Send <code>/emojiid</code> followed by the custom emoji(s) and I'll return their IDs.\n"
+            "<i>(You need Telegram Premium to send custom emoji.)</i>"
+        )
+        return
+    await message.answer("Custom emoji IDs:\n" + "\n".join(f"<code>{i}</code>" for i in ids))
+
+
 @router.message(Command("followed"))
 async def cmd_followed(message: Message) -> None:
     wallets = await tracker_state.followed_list()

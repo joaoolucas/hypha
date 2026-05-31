@@ -98,6 +98,7 @@ class Settings(BaseSettings):
     dedust_base: str = "https://api.dedust.io/v2"
     swapcoffee_base: str = "https://backend.swap.coffee"
     geckoterminal_base: str = "https://api.geckoterminal.com/api/v2"
+    dexscreener_base: str = "https://api.dexscreener.com"
 
     # Referral
     stonfi_referral_address: str = ""
@@ -134,6 +135,10 @@ class Settings(BaseSettings):
     # Token-centric discovery (watch the hottest pools' trade feeds)
     hot_pools_max: int = 120           # how many hot pools to watch for trades
     new_pools_reserve: int = 50        # of those, always watch the freshest launches (not crowded out by volume)
+    # DexScreener search terms to pull extra TON pairs Gecko misses (e.g. the Uranus launchpad DEX).
+    # Off by default: DexScreener surfaces these pools, but TonAPI can't yet decode some launchpad
+    # DEXes' swaps (Uranus), so watching them yields no alerts until a per-DEX parser is added.
+    dexscreener_queries: str = ""
     trades_poll_secs: int = 120        # trade-poll cycle interval (seconds); trades come from TonAPI
     discovery_poll_secs: int = 1_800   # how often the hot-pool set is refreshed (Gecko)
     trade_concurrency: int = 6         # cap concurrent TonAPI pool-event calls
@@ -149,6 +154,10 @@ class Settings(BaseSettings):
     trade_max_age_secs: int = 900      # ignore trades older than this (avoids restart-backlog floods)
 
     score: ScoreConfig = Field(default_factory=ScoreConfig)
+
+    @property
+    def dexscreener_query_list(self) -> list[str]:
+        return [q.strip() for q in self.dexscreener_queries.replace(",", " ").split() if q.strip()]
 
     @property
     def admin_id_set(self) -> set[int]:
