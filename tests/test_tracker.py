@@ -183,7 +183,7 @@ def test_render_buy_card_and_buttons():
     assert "GeckoTerminal" not in html and "Hypha" not in html
     labels = [b.text for row in kb.inline_keyboard for b in row]
     urls = [b.url for row in kb.inline_keyboard for b in row]
-    assert "⚡ DTrade" in labels and "⚡ RedoTrade" in labels
+    assert "⚡ DTrade" in labels and "🐶 RedoTrade" in labels
     assert "🔎 Tonviewer" in labels and "🦅 DexScreener" in labels
     assert not any("Buy" in lbl for lbl in labels)               # Buy button removed
     assert any("t.me/dtrade?start=25BSDKtN0o_EQ" in u for u in urls)

@@ -69,7 +69,7 @@ def _keyboard(addr: str) -> InlineKeyboardMarkup:
     a = quote(addr, safe="")
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⚡ DTrade", url=_DTRADE + addr),
-         InlineKeyboardButton(text="⚡ RedoTrade", url=_REDOTRADE + addr)],
+         InlineKeyboardButton(text="🐶 RedoTrade", url=_REDOTRADE + addr)],
         [InlineKeyboardButton(text="🔎 Tonviewer", url=f"https://tonviewer.com/{a}"),
          InlineKeyboardButton(text="🦅 DexScreener", url=f"https://dexscreener.com/ton/{a}")],
     ])
