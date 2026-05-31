@@ -61,8 +61,8 @@ def _size(trade: Trade) -> str:
 def _headline(trade: Trade, ctx: TraderContext) -> str:
     size = _size(trade)
     if trade.side == TradeSide.BUY:
-        return f"🐋 <b>WHALE BUY · {size}</b>" if ctx.is_whale else f"🟢 <b>BUY · {size}</b>"
-    return f"🐋📉 <b>WHALE SELL · {size}</b>" if ctx.is_whale else f"🔴 <b>SELL · {size}</b>"
+        return f"🟢🐋 <b>WHALE BUY · {size}</b>" if ctx.is_whale else f"🟢 <b>BUY · {size}</b>"
+    return f"🔴🐋 <b>WHALE SELL · {size}</b>" if ctx.is_whale else f"🔴 <b>SELL · {size}</b>"
 
 
 def _keyboard(addr: str) -> InlineKeyboardMarkup:
