@@ -79,8 +79,6 @@ def render_alert(
     trade: Trade,
     ctx: TraderContext,
     report: TokenReport,
-    *,
-    promoted: bool = False,
 ) -> tuple[str, InlineKeyboardMarkup]:
     t, d = report.token, report.dex
     addr = to_friendly(t.address, bounceable=True)
@@ -116,8 +114,6 @@ def render_alert(
             hurl = f'https://tonviewer.com/{quote(to_friendly(ctx.address), safe="")}?section=tokens'
             L += ["", f'👜 <a href="{hurl}">Holdings:</a>']   # tap-through to the whale's full holdings
             L += holdings
-    if promoted:
-        L.append(f"⭐ <i>added to the followed list — {ctx.big_buys} big buys lately</i>")
 
     L += ["", f"🧬 CA: <code>{_esc(addr)}</code>"]
     return "\n".join(L), _keyboard(addr)

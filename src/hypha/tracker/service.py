@@ -75,23 +75,21 @@ async def handle_trade(trade: Trade, tonapi: TonAPI, publisher, s: Settings,
     trade.usd = await _price_in_usd(trade, report)
     ctx = await enrich_trader(trade.trader, tonapi, s)
 
-    # Auto-promotion runs BEFORE the post gate and regardless of whale status: a wallet that
-    # repeatedly makes sized buys is smart money worth following, even if its portfolio is light.
-    # Crossing the threshold flips is_followed so this very buy posts as the promotion moment.
-    promoted = False
+    # Auto-promotion: a wallet that repeatedly makes sized buys is smart money worth following
+    # (tracked for its future sells), even if its portfolio is light.
     if trade.side == TradeSide.BUY and trade.usd >= floor and not ctx.excluded:
         ctx.big_buys = await state.record_big_buy(trade.trader, s.promote_window_secs)
         if (s.follow_enabled and not ctx.is_followed
                 and ctx.big_buys >= s.promote_min_buys
                 and await state.followed_count() < s.followed_max):
             await state.add_followed(trade.trader)
-            ctx.is_followed = promoted = True
+            ctx.is_followed = True
             log.info("wallet_promoted", trader=trade.trader, buys=ctx.big_buys)
 
     if not _should_post(trade, ctx, floor, sell_floor):
         return False
 
-    text, keyboard = render_alert(trade, ctx, report, promoted=promoted)
+    text, keyboard = render_alert(trade, ctx, report)
     posted = await publish_alert(publisher, s.alerts_channel_id, text, keyboard)
     if posted:
         await _log_alert(trade, ctx, report)
