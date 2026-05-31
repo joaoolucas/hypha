@@ -16,7 +16,7 @@ import structlog
 
 from ..analysis.discovery import hot_pools
 from ..analysis.service import analyze_token
-from ..analysis.trades import parse_pool_events, parse_tonapi_events
+from ..analysis.trades import parse_pool_events, parse_tonapi_events, parse_uranus_events
 from ..bot.channel import publish_alert, render_alert
 from ..config import Settings
 from ..connectors.dexscreener import DexScreener
@@ -137,11 +137,16 @@ async def trade_cycle(gecko: GeckoTerminal, tonapi: TonAPI, bot, s: Settings) ->
     async def _fresh(pool):
         async with sem:
             try:
-                events = await tonapi.account_events(pool.pool_address, limit=30)
+                if pool.venue == "uranus":
+                    # Uranus/Topblast: parse the Meme contract's on-chain BuyEvent/SellEvent
+                    txs = await tonapi.blockchain_transactions(pool.token_address, limit=20)
+                    parsed = parse_uranus_events(txs, pool, ton_usd)
+                else:
+                    events = await tonapi.account_events(pool.pool_address, limit=30)
+                    parsed = parse_pool_events(events, pool, ton_usd)
             except Exception as exc:  # noqa: BLE001
-                log.warning("pool_events_failed", pool=pool.pool_address, error=str(exc))
+                log.warning("pool_fetch_failed", pool=pool.pool_address, venue=pool.venue, error=str(exc))
                 return []
-        parsed = parse_pool_events(events, pool, ton_usd)
         return await state.new_pool_trades(pool.pool_address, parsed)
 
     batches = await asyncio.gather(*(_fresh(p) for p in pools), return_exceptions=True)

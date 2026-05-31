@@ -1,6 +1,10 @@
 """Swap classification — TonAPI pool/account events + Gecko trades into buy/sell Trades."""
 
-from hypha.analysis.trades import parse_gecko_trades, parse_pool_events, parse_tonapi_events
+from pytoniq_core import Address, begin_cell
+
+from hypha.analysis.trades import (
+    parse_gecko_trades, parse_pool_events, parse_tonapi_events, parse_uranus_events,
+)
 from hypha.models import HotPool, TradeSide
 from hypha.utils import to_raw
 
@@ -146,3 +150,43 @@ def test_tonapi_skips_failed_and_jetton_to_jetton():
               "actions": [{"type": "JettonSwap", "status": "failed",
                            "JettonSwap": {"ton_in": 1, "jetton_master_out": jout}}]}
     assert parse_tonapi_events([failed], "0:wallet") == []
+
+
+URANUS_POOL = HotPool(pool_address="EQuran", token_address="0:" + "aa" * 32,
+                      token_symbol="ROBIN", venue="uranus")
+
+
+def _uranus_tx(op, trader, amount_in, amount_out, tx_hash="h"):
+    body = (begin_cell()
+            .store_uint(op, 32)
+            .store_address(Address(trader))
+            .store_coins(amount_in)
+            .store_coins(amount_out)
+            .end_cell())
+    return {"utime": 1717000000, "hash": tx_hash,
+            "out_msgs": [{"op_code": hex(op), "raw_body": body.to_boc().hex(), "destination": None}]}
+
+
+def test_parse_uranus_buy_event():
+    tx = _uranus_tx(0xA0AA6BC2, "0:" + "bb" * 32, int(24.75e9), int(26_839_282e9))
+    trades = parse_uranus_events([tx], URANUS_POOL, ton_usd=2.0)
+    assert len(trades) == 1
+    t = trades[0]
+    assert t.side == TradeSide.BUY
+    assert t.ton_value == 24.75            # amountIn = TON spent
+    assert t.usd == 49.5                   # 24.75 × $2
+    assert t.token_symbol == "ROBIN" and t.source == "uranus"
+    assert t.trader == "0:" + "bb" * 32
+
+
+def test_parse_uranus_sell_event():
+    tx = _uranus_tx(0x3AB0FCCC, "0:" + "cc" * 32, int(16_363_002e9), int(14.91e9))
+    trades = parse_uranus_events([tx], URANUS_POOL, ton_usd=2.0)
+    assert len(trades) == 1 and trades[0].side == TradeSide.SELL
+    assert trades[0].ton_value == 14.91    # amountOut = TON returned, the size of a sell
+
+
+def test_parse_uranus_ignores_other_ops():
+    tx = {"utime": 1, "hash": "h",
+          "out_msgs": [{"op_code": "0x178d4519", "raw_body": "", "destination": None}]}
+    assert parse_uranus_events([tx], URANUS_POOL, 2.0) == []

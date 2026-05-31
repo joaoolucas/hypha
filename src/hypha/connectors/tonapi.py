@@ -105,6 +105,15 @@ class TonAPI(BaseConnector):
         )
         return d.get("events", []) or []
 
+    async def blockchain_transactions(self, addr: str, limit: int = 20) -> list[dict]:
+        """Raw transactions for an account, with out_msgs + raw bodies — used to read launchpad
+        on-chain events (e.g. Uranus/Topblast BuyEvent/SellEvent) that aren't decoded as swaps."""
+        d = await self.get(
+            f"/v2/blockchain/accounts/{addr}/transactions",
+            params={"limit": min(limit, 1000)},
+        )
+        return d.get("transactions", []) or []
+
     async def account_ton(self, addr: str) -> float:
         """An account's native TON balance (whole TON) — counts toward whale portfolio value."""
         d = await self.get(f"/v2/accounts/{addr}", cache_key=f"ta:acct:{addr}", ttl=120)

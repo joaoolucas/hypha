@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from pytoniq_core import Cell
+
 from ..models import HotPool, Trade, TradeSide
 from ..utils import to_raw
 from .discovery import is_stable
@@ -136,6 +138,53 @@ def parse_pool_events(events: list[dict], pool, ton_usd: float = 0.0) -> list[Tr
                 tx_hash=event_id,
                 ts=ts,
                 source="tonapi",
+            ))
+    return out
+
+
+_URANUS_BUY = 0xA0AA6BC2     # Topblast/Uranus BuyEvent  (amountIn=TON, amountOut=tokens)
+_URANUS_SELL = 0x3AB0FCCC    # Topblast/Uranus SellEvent (amountIn=tokens, amountOut=TON)
+
+
+def parse_uranus_events(transactions: list[dict], pool: HotPool, ton_usd: float = 0.0) -> list[Trade]:
+    """Decode Topblast/Uranus on-chain trade events. The Meme contract (the token's jetton master)
+    emits a BuyEvent/SellEvent as an external out-message after each trade; we parse the body cell
+    exactly per the documented layout (op, trader, amountIn, amountOut). No heuristics."""
+    out: list[Trade] = []
+    for tx in transactions:
+        ts = float(tx.get("utime", 0) or 0)
+        tx_hash = tx.get("hash", "")
+        for m in tx.get("out_msgs", []) or []:
+            if m.get("op_code") not in ("0xa0aa6bc2", "0x3ab0fccc") or not m.get("raw_body"):
+                continue
+            try:
+                s = Cell.one_from_boc(bytes.fromhex(m["raw_body"])).begin_parse()
+                op = s.load_uint(32)
+                trader = s.load_address()
+                amount_in = s.load_coins()
+                amount_out = s.load_coins()
+            except Exception:  # noqa: BLE001 — skip a malformed event body
+                continue
+            if trader is None:
+                continue
+            if op == _URANUS_BUY:
+                side, ton_nano, token_nano = TradeSide.BUY, amount_in, amount_out
+            else:
+                side, ton_nano, token_nano = TradeSide.SELL, amount_out, amount_in
+            ton_value = (ton_nano or 0) / 1e9
+            out.append(Trade(
+                side=side,
+                token_address=pool.token_address,
+                token_symbol=pool.token_symbol,
+                trader=f"{trader.wc}:{trader.hash_part.hex()}",
+                usd=round(ton_value * ton_usd, 2) if ton_usd else 0.0,
+                ton_value=round(ton_value, 2),
+                token_amount=(token_nano or 0) / 1e9,
+                venue=pool.venue or "uranus",
+                pool_address=pool.pool_address,
+                tx_hash=tx_hash,
+                ts=ts,
+                source="uranus",
             ))
     return out
 
