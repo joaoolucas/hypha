@@ -65,6 +65,7 @@ async def enrich_trader(trader_raw: str, tonapi: TonAPI, settings: Settings) -> 
             bags.append({"symbol": sym, "usd": round(usd, 2)})
 
     # native TON counts toward whale value too (some whales hold mostly TON, not jettons)
+    ton_usd = 0.0
     try:
         ton_usd = await tonapi.ton_usd()
         if ton_usd:
@@ -76,6 +77,8 @@ async def enrich_trader(trader_raw: str, tonapi: TonAPI, settings: Settings) -> 
 
     bags.sort(key=lambda b: b["usd"], reverse=True)
     ctx.portfolio_usd = round(portfolio, 2)
-    ctx.is_whale = portfolio >= settings.whale_portfolio_usd
+    # whale threshold is TON-denominated (priced at the current TON rate), with a USD fallback
+    whale_floor = settings.whale_portfolio_ton * ton_usd if ton_usd else settings.whale_portfolio_usd
+    ctx.is_whale = portfolio >= whale_floor
     ctx.top_bags = bags[:3]
     return ctx

@@ -8,6 +8,7 @@ from hypha.models import (
     DexReport, HyphaScore, TokenInfo, TokenReport, Trade, TraderContext, TradeSide,
 )
 from hypha.tracker import service, state
+from hypha.tracker.enrich import enrich_trader
 
 
 def _report(symbol="SHROOM", price=0.001, score=72, mcap=1_000_000):
@@ -156,13 +157,19 @@ def _bal(symbol, usd, name="", decimals=9):
 
 
 async def test_enrich_excludes_lp_staked_stables_from_holdings():
-    from hypha.tracker.enrich import enrich_trader
     bals = [_bal("DOGS", 5000), _bal("STON-LP", 9000), _bal("STAKED", 24000),
             _bal("USDT", 3000), _bal("CAT", 2000)]
     ctx = await enrich_trader("0:hold", _FakeTon(bals), _settings())
     syms = [b["symbol"] for b in ctx.top_bags]
     assert "DOGS" in syms and "CAT" in syms
     assert "STON-LP" not in syms and "STAKED" not in syms and "USDT" not in syms
+
+
+async def test_whale_floor_is_ton_denominated():
+    # 1000 TON × $5 = $5000 whale floor (FakeTon prices TON at $5, holds no native TON)
+    s = _settings(whale_portfolio_ton=1000)
+    assert (await enrich_trader("0:w2", _FakeTon([_bal("DOGS", 6000)]), s)).is_whale is True
+    assert (await enrich_trader("0:w3", _FakeTon([_bal("DOGS", 4000)]), s)).is_whale is False
 
 
 async def test_non_whale_big_buy_not_posted(captured, monkeypatch):
