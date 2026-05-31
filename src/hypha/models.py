@@ -193,6 +193,8 @@ class TraderContext(BaseModel):
     excluded: bool = False             # router / pool / burn — not a real trader
     label: str | None = None
     big_buys: int = 0                  # qualifying buys counted toward promotion
+    ton_balance: float = 0.0           # native TON balance (whole TON)
+    ton_value_usd: float = 0.0         # USD value of the native TON balance
     top_bags: list[dict] = Field(default_factory=list)   # [{symbol, usd}]
 
 

@@ -127,12 +127,6 @@ class Settings(BaseSettings):
     alerts_enabled: bool = True        # master switch for the token-centric trade poller
     admin_ids: str = ""                # comma/space-separated tg user ids allowed to /track
 
-    # Userbot posting (a dedicated Premium account) — required to render branded custom emoji in
-    # a channel; falls back to the bot (plain emoji) when unset. Session is sensitive (.env only).
-    userbot_api_id: int = 0
-    userbot_api_hash: str = ""
-    userbot_session: str = ""
-
     buy_alert_ton: float = 100.0       # min BUY size (TON) — secondary; the primary gate is "is a whale"
     buy_alert_usd: float = 200.0       # fallback BUY floor (USD) when the TON price is unavailable
     sell_alert_usd: float = 10_000.0   # post a SELL only at/above this USD (big dumps)

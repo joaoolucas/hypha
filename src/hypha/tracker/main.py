@@ -1,7 +1,6 @@
 """Tracker entrypoint — `python -m hypha.tracker.main`. Runs the discovery/trade/follow loops
-side by side, each on its own interval. Posts via a userbot (a Premium account, for branded
-custom emoji) when configured, else via the bot. Resilient: a failing cycle is logged and the
-loop keeps its cadence.
+side by side, each on its own interval. Posts via the aiogram bot (which can attach inline
+button grids). Resilient: a failing cycle is logged and the loop keeps its cadence.
 """
 
 from __future__ import annotations
@@ -10,29 +9,16 @@ import asyncio
 import logging
 
 import structlog
+from aiogram import Bot
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 
 from ..config import get_settings
 from ..connectors.geckoterminal import GeckoTerminal
 from ..connectors.tonapi import TonAPI
 from ..db.session import init_models
-from .publisher import BotPublisher, UserbotPublisher
+from .publisher import BotPublisher
 from .service import discovery_cycle, follow_cycle, trade_cycle
-
-
-async def _make_publisher(s, log):
-    """Userbot (Premium account → branded custom emoji) if configured, else the aiogram bot."""
-    if s.userbot_session and s.userbot_api_id:
-        pub = UserbotPublisher(s.userbot_api_id, s.userbot_api_hash, s.userbot_session)
-        await pub.start()
-        log.info("posting_via", mode="userbot")
-        return pub
-    from aiogram import Bot
-    from aiogram.client.default import DefaultBotProperties
-    from aiogram.enums import ParseMode
-    if not s.bot_token:
-        raise SystemExit("set a userbot session or BOT_TOKEN so the tracker can post")
-    log.info("posting_via", mode="bot")
-    return BotPublisher(Bot(s.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML)))
 
 
 def _setup_logging(level: str) -> None:
@@ -57,10 +43,12 @@ async def main() -> None:
     s = get_settings()
     _setup_logging(s.log_level)
     log = structlog.get_logger("tracker")
+    if not s.bot_token:
+        raise SystemExit("BOT_TOKEN is not set (see .env.example)")
     if not s.alerts_channel_id:
         log.warning("alerts_channel_unset", hint="set ALERTS_CHANNEL_ID so the tracker can post")
 
-    publisher = await _make_publisher(s, log)
+    publisher = BotPublisher(Bot(s.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML)))
     gecko, tonapi = GeckoTerminal(), TonAPI()
     try:
         await init_models()                  # create the alerts table if DATABASE_URL is set

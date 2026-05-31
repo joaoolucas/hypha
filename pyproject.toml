@@ -19,7 +19,6 @@ dependencies = [
     "networkx>=3.3",
     "numpy>=1.26",
     "pytoniq-core>=0.1.36",
-    "telethon>=1.36",
 ]
 
 [project.optional-dependencies]

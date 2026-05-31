@@ -110,6 +110,14 @@ async def test_stablecoin_token_not_posted(captured, monkeypatch):
     assert captured == []
 
 
+async def test_wrapped_ton_token_not_posted(captured, monkeypatch):
+    _patch_enrich(monkeypatch, is_whale=True)             # whale, but the token is staked TON
+    tr = _trade(usd=5000, trader="0:wt", token="EQtston", tx="wt")
+    tr.token_symbol = "tsTON"
+    assert await service.handle_trade(tr, None, None, _settings()) is False
+    assert captured == []
+
+
 async def test_non_whale_big_buy_not_posted(captured, monkeypatch):
     # the reported bug: a big buy by a non-whale, non-followed wallet must NOT post
     _patch_enrich(monkeypatch)                              # not a whale, not followed
@@ -165,26 +173,38 @@ async def test_recurring_buyer_promoted_but_buy_not_posted(captured, monkeypatch
 
 
 # ── rendering ───────────────────────────────────────────────────────────────────
-def test_render_buy_shows_ton_size():
+def test_render_buy_card_and_buttons():
     tr = Trade(side=TradeSide.BUY, token_address="EQd", token_symbol="DUROVIUS",
                trader="0:b", usd=285, ton_value=100.0)
-    text, emojis = render_alert(tr, TraderContext(address="0:b"), _report("DUROVIUS"))
-    assert "🟢 <b>BUY · 100 TON ($285) · $DUROVIUS</b>" in text
-    assert "🟡 DeDust" in text                                    # venue (report dex is dedust)
-    assert ("🟡", 5391224493911876583) in emojis                 # branded venue emoji
-    assert ("🔷", 5364245841525645356) in emojis                 # branded Tonviewer emoji
-    assert ("🦅", 5391144822268537893) in emojis                 # branded DexScreener emoji
-    assert "Tonviewer</a>" in text and "DexScreener</a>" in text
-    assert "GeckoTerminal" not in text and "Chart</a>" not in text  # removed
-    assert "Hypha" not in text
-    # trade-bot referral links carry the friendly token address in the start payload
-    assert 'href="https://t.me/dtrade?start=25BSDKtN0o_EQ' in text and "DTrade</a>" in text
-    assert 'href="https://t.me/redotrade?start=mAJe4lm0_EQ' in text and "RedoTrade</a>" in text
+    html, kb = render_alert(tr, TraderContext(address="0:b", is_whale=True), _report("DUROVIUS"))
+    assert "🐋 <b>WHALE BUY · 100 TON ($285) · $DUROVIUS</b> via DeDust" in html
+    assert "Price " in html and "MC " in html and "Liq " in html and "Vol " in html
+    assert "CA: <code>" in html
+    assert "GeckoTerminal" not in html and "Hypha" not in html
+    labels = [b.text for row in kb.inline_keyboard for b in row]
+    urls = [b.url for row in kb.inline_keyboard for b in row]
+    assert "⚡ DTrade" in labels and "⚡ RedoTrade" in labels
+    assert "🔎 Tonviewer" in labels and "🦅 DexScreener" in labels
+    assert not any("Buy" in lbl for lbl in labels)               # Buy button removed
+    assert any("t.me/dtrade?start=25BSDKtN0o_EQ" in u for u in urls)
+    assert any("t.me/redotrade?start=mAJe4lm0_EQ" in u for u in urls)
+
+
+def test_render_shows_ton_in_holdings():
+    tr = Trade(side=TradeSide.BUY, token_address="EQd", token_symbol="X", trader="0:b",
+               usd=300, ton_value=100.0)
+    ctx = TraderContext(address="0:b", is_whale=True, portfolio_usd=50_000,
+                        ton_balance=8791.0, ton_value_usd=45_600.0,
+                        top_bags=[{"symbol": "REDO", "usd": 8000}])
+    html, _ = render_alert(tr, ctx, _report("X"))
+    assert "Holdings:" in html
+    assert "• 8,791 TON ($45.6k)" in html                        # native TON shown in holdings
+    assert "• $REDO $8.0k" in html
 
 
 def test_render_sell_whale_card():
     tr = _trade(side=TradeSide.SELL, usd=14000, token="EQt", trader="0:w")
     ctx = TraderContext(address="0:w", is_whale=True, portfolio_usd=200_000)
-    text, emojis = render_alert(tr, ctx, _report("CAT"))
-    assert "WHALE SELL" in text and "$14.0k" in text
-    assert "Hypha" not in text
+    html, kb = render_alert(tr, ctx, _report("CAT"))
+    assert "WHALE SELL" in html and "$14.0k" in html
+    assert kb.inline_keyboard       # buttons present

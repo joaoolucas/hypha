@@ -14,7 +14,7 @@ import time
 
 import structlog
 
-from ..analysis.discovery import hot_pools, is_stable
+from ..analysis.discovery import hot_pools, is_quote_asset
 from ..analysis.service import analyze_token
 from ..analysis.trades import parse_pool_events, parse_tonapi_events, parse_uranus_events
 from ..bot.channel import render_alert
@@ -33,9 +33,9 @@ log = structlog.get_logger(__name__)
 _MAX_POSTS_PER_CYCLE = 15        # flood guard; drops beyond this are logged, never silent
 
 
-async def publish_alert(publisher, channel: str, text: str, emojis) -> bool:
-    """Send one rendered alert via the active publisher (userbot or bot)."""
-    return await publisher.publish(channel, text, emojis)
+async def publish_alert(publisher, channel: str, text: str, keyboard) -> bool:
+    """Send one rendered alert (html + inline keyboard) via the bot publisher."""
+    return await publisher.publish(channel, text, keyboard)
 
 
 def _should_post(trade: Trade, ctx, s: Settings, buy_floor_usd: float) -> bool:
@@ -62,8 +62,8 @@ async def handle_trade(trade: Trade, tonapi: TonAPI, publisher, s: Settings,
     """Process one detected swap. Returns True if it was posted. `buy_floor_usd` is the effective
     USD buy threshold (TON-denominated, converted at the current TON price); falls back to config."""
     floor = buy_floor_usd if buy_floor_usd is not None else s.buy_alert_usd
-    if not trade.token_address or is_stable(trade.token_symbol):
-        return False                                  # ignore stablecoins (USDT, etc.) as the traded token
+    if not trade.token_address or is_quote_asset(trade.token_symbol):
+        return False                                  # ignore stablecoins + TON/wrapped-TON as the traded token
     if not await state.is_new_op(trade, s.alert_dedup_ttl):
         return False
 
@@ -87,8 +87,8 @@ async def handle_trade(trade: Trade, tonapi: TonAPI, publisher, s: Settings,
     if not _should_post(trade, ctx, s, floor):
         return False
 
-    text, emojis = render_alert(trade, ctx, report, promoted=promoted)
-    posted = await publish_alert(publisher, s.alerts_channel_id, text, emojis)
+    text, keyboard = render_alert(trade, ctx, report, promoted=promoted)
+    posted = await publish_alert(publisher, s.alerts_channel_id, text, keyboard)
     if posted:
         await _log_alert(trade, ctx, report)
     return posted

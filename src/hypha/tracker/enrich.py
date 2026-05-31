@@ -67,7 +67,9 @@ async def enrich_trader(trader_raw: str, tonapi: TonAPI, settings: Settings) -> 
     try:
         ton_usd = await tonapi.ton_usd()
         if ton_usd:
-            portfolio += await tonapi.account_ton(trader_raw) * ton_usd
+            ctx.ton_balance = round(await tonapi.account_ton(trader_raw), 2)
+            ctx.ton_value_usd = round(ctx.ton_balance * ton_usd, 2)
+            portfolio += ctx.ton_value_usd
     except Exception as exc:  # noqa: BLE001 — TON balance is a bonus signal, never fatal
         log.warning("enrich_ton_balance_failed", trader=trader_raw, error=str(exc))
 

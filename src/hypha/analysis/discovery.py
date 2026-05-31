@@ -21,7 +21,8 @@ from .dex import _norm_venue
 
 log = structlog.get_logger(__name__)
 
-_TON_SYMBOLS = {"TON", "WTON", "PTON", "TONCOIN"}
+# TON + wrapped/staked TON (LSTs) — treated as "money", never the memecoin we alert on.
+_TON_SYMBOLS = {"TON", "WTON", "PTON", "TONCOIN", "TSTON", "STTON", "HTON", "WSTON", "USTON"}
 _STABLE_SYMBOLS = {"USDT", "USD₮", "USDC", "USDE", "JUSDT", "JUSDC", "DAI", "TSUSDE", "USDA"}
 _FEE_SUFFIX = re.compile(r"\s+\d+(\.\d+)?%$")   # DeDust names append a fee tier: "TON 0.25%"
 
