@@ -177,6 +177,9 @@ def test_render_buy_shows_ton_size():
     assert "Tonviewer</a>" in text and "DexScreener</a>" in text
     assert "GeckoTerminal" not in text and "Chart</a>" not in text  # removed
     assert "Hypha" not in text
+    # trade-bot referral links carry the friendly token address in the start payload
+    assert 'href="https://t.me/dtrade?start=25BSDKtN0o_EQ' in text and "DTrade</a>" in text
+    assert 'href="https://t.me/redotrade?start=mAJe4lm0_EQ' in text and "RedoTrade</a>" in text
 
 
 def test_render_sell_whale_card():

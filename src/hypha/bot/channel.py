@@ -20,6 +20,10 @@ _LINK_EMOJI = {
     "dexscreener": ("🦅", 5391144822268537893),
 }
 
+# Trade-bot deep links (referral); the friendly token address is appended to the start payload.
+_DTRADE = "https://t.me/dtrade?start=25BSDKtN0o_"
+_REDOTRADE = "https://t.me/redotrade?start=mAJe4lm0_"
+
 
 def _esc(s: str | None) -> str:
     return html.escape(s or "")
@@ -132,13 +136,14 @@ def render_alert(
     a = quote(addr, safe="")
     tv_char, tv_id = _LINK_EMOJI["tonviewer"]
     dx_char, dx_id = _LINK_EMOJI["dexscreener"]
-    foot = []
+    trade_links = [f'⚡ <a href="{_esc(_DTRADE + addr)}">DTrade</a>',
+                   f'⚡ <a href="{_esc(_REDOTRADE + addr)}">RedoTrade</a>']
     buy = build_buy(report)
     if buy:
-        foot.append(f'🛒 <a href="{_esc(buy["url"])}">Buy</a>')
-    foot.append(f'{tv_char} <a href="https://tonviewer.com/{a}">Tonviewer</a>')
-    foot.append(f'{dx_char} <a href="https://dexscreener.com/ton/{a}">DexScreener</a>')
-    L += ["", f"<code>{_esc(addr)}</code>", " · ".join(foot)]
+        trade_links.append(f'🛒 <a href="{_esc(buy["url"])}">Buy</a>')
+    explorer_links = [f'{tv_char} <a href="https://tonviewer.com/{a}">Tonviewer</a>',
+                      f'{dx_char} <a href="https://dexscreener.com/ton/{a}">DexScreener</a>']
+    L += ["", f"<code>{_esc(addr)}</code>", " · ".join(trade_links), " · ".join(explorer_links)]
 
     emojis = [e for e in (venue_emoji, (tv_char, tv_id), (dx_char, dx_id)) if e]
     return "\n".join(L), emojis
