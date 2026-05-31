@@ -10,10 +10,10 @@ from hypha.models import (
 from hypha.tracker import service, state
 
 
-def _report(symbol="SHROOM", price=0.001, score=72):
+def _report(symbol="SHROOM", price=0.001, score=72, mcap=1_000_000):
     return TokenReport(
         token=TokenInfo(address="EQtok", symbol=symbol),
-        dex=DexReport(has_pool=True, price_usd=price, market_cap_usd=1_000_000,
+        dex=DexReport(has_pool=True, price_usd=price, market_cap_usd=mcap,
                       liquidity_usd=85_000, venues=["dedust"], price_change_24h=18.0),
         score=HyphaScore(score=score, tier="Healthy Cap", badge="🍄"),
     )
@@ -110,6 +110,16 @@ async def test_stablecoin_token_not_posted(captured, monkeypatch):
     assert captured == []
 
 
+async def test_high_mcap_buy_not_posted(captured, monkeypatch):
+    async def big_analyze(addr, **kw):
+        return _report(mcap=50_000_000)                # above the $10M cap
+    monkeypatch.setattr(service, "analyze_token", big_analyze)
+    _patch_enrich(monkeypatch, is_whale=True)
+    tr = _trade(usd=5000, trader="0:big", token="EQbig", tx="big")
+    assert await service.handle_trade(tr, None, None, _settings()) is False
+    assert captured == []
+
+
 async def test_wrapped_ton_token_not_posted(captured, monkeypatch):
     _patch_enrich(monkeypatch, is_whale=True)             # whale, but the token is staked TON
     tr = _trade(usd=5000, trader="0:wt", token="EQtston", tx="wt")
@@ -176,10 +186,13 @@ async def test_recurring_buyer_promoted_but_buy_not_posted(captured, monkeypatch
 def test_render_buy_card_and_buttons():
     tr = Trade(side=TradeSide.BUY, token_address="EQd", token_symbol="DUROVIUS",
                trader="0:b", usd=285, ton_value=100.0)
-    html, kb = render_alert(tr, TraderContext(address="0:b", is_whale=True), _report("DUROVIUS"))
+    html, kb = render_alert(tr, TraderContext(address="0:b", is_whale=True, portfolio_usd=42_000),
+                            _report("DUROVIUS"))
     assert "🐋 <b>WHALE BUY · 100 TON ($285) · $DUROVIUS</b> via DeDust" in html
-    assert "Price " in html and "MC " in html and "Liq " in html and "Vol " in html
-    assert "CA: <code>" in html
+    assert "💰 Price " in html and "📈 24h " in html
+    assert "🏦 MC " in html and "💧 Liq " in html and "📊 Vol " in html
+    assert "💼 " in html and "Wallet" in html
+    assert "🧬 CA: <code>" in html
     assert "GeckoTerminal" not in html and "Hypha" not in html
     labels = [b.text for row in kb.inline_keyboard for b in row]
     urls = [b.url for row in kb.inline_keyboard for b in row]

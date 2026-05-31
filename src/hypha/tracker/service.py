@@ -68,6 +68,9 @@ async def handle_trade(trade: Trade, tonapi: TonAPI, publisher, s: Settings,
         return False
 
     report = await analyze_token(trade.token_address)
+    mcap = report.dex.market_cap_usd if report.dex else None
+    if mcap and mcap > s.max_mcap_usd:                # small-cap focus; skip big tokens (holdings unaffected)
+        return False
     trade.usd = await _price_in_usd(trade, report)
     ctx = await enrich_trader(trade.trader, tonapi, s)
 

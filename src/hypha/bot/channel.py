@@ -91,12 +91,13 @@ def render_alert(
     L: list[str] = [head]
 
     if d:
-        price = f"Price {fmt_price(d.price_usd)}"
         chg = _pct(d.price_change_24h)
+        price = f"💰 Price {fmt_price(d.price_usd)}"
         if chg:
-            price += f" · 24h {chg}"
+            arrow = "📉" if (d.price_change_24h or 0) < 0 else "📈"
+            price += f" · {arrow} 24h {chg}"
         L += ["", price,
-              f"MC {fmt_usd(d.market_cap_usd)} · Liq {fmt_usd(d.liquidity_usd)} · Vol {fmt_usd(d.volume24h_usd)}"]
+              f"🏦 MC {fmt_usd(d.market_cap_usd)} · 💧 Liq {fmt_usd(d.liquidity_usd)} · 📊 Vol {fmt_usd(d.volume24h_usd)}"]
 
     L.append("")
     if ctx.excluded:
@@ -104,7 +105,7 @@ def render_alert(
     else:
         line = f"👤 {_trader_link(ctx.address)}"
         if ctx.portfolio_usd > 0:
-            line += f" · {fmt_usd(ctx.portfolio_usd)} Wallet"
+            line += f" · 💼 {fmt_usd(ctx.portfolio_usd)} Wallet"
         L.append(line)
         holdings = []
         if ctx.ton_balance > 0:
@@ -112,10 +113,10 @@ def render_alert(
         holdings += [f"• ${_esc(b['symbol'])} {fmt_usd(b['usd'])}"
                      for b in ctx.top_bags if b.get("symbol")][:3]
         if holdings:
-            L += ["", "Holdings:"]
+            L += ["", "👜 Holdings:"]
             L += holdings
     if promoted:
         L.append(f"⭐ <i>added to the followed list — {ctx.big_buys} big buys lately</i>")
 
-    L += ["", f"CA: <code>{_esc(addr)}</code>"]
+    L += ["", f"🧬 CA: <code>{_esc(addr)}</code>"]
     return "\n".join(L), _keyboard(addr)

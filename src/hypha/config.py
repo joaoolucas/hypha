@@ -132,6 +132,7 @@ class Settings(BaseSettings):
     buy_alert_usd: float = 200.0       # fallback BUY floor (USD) when the TON price is unavailable
     sell_alert_usd: float = 10_000.0   # post a SELL only at/above this USD (big dumps)
     whale_portfolio_usd: float = 10_000.0   # buyer tagged 🐋 at/above this total portfolio USD
+    max_mcap_usd: float = 10_000_000.0 # only alert on tokens at/below this market cap (small-cap focus)
 
     # Token-centric discovery (watch the hottest pools' trade feeds)
     hot_pools_max: int = 120           # how many hot pools to watch for trades
