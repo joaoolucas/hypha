@@ -44,6 +44,9 @@ def _fmt_ton(ton: float) -> str:
     return f"{ton:,.0f}" if ton >= 10 else f"{ton:.1f}"
 
 
+# Plain Unicode circles: Telegram won't render bot custom emoji in *channels* without a
+# Fragment-purchased username, so the branded NoNameDev logos (🟡=5391224493911876583,
+# 🔵=5388852301869916327) only fall back to these here. Kept as IDs in case we ever enable them.
 _VENUE_DISPLAY = {"dedust": "🟡 DeDust", "stonfi": "🔵 STON.fi"}
 
 
