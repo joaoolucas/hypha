@@ -92,6 +92,7 @@ class Settings(BaseSettings):
     # Providers
     tonapi_key: str = ""
     tonapi_base: str = "https://tonapi.io"
+    tonapi_min_interval: float = 0.12  # min seconds between TonAPI calls (~8/s, under the 10 RPS tier)
     toncenter_key: str = ""
     toncenter_base: str = "https://toncenter.com/api/v3"
     stonfi_base: str = "https://api.ston.fi"

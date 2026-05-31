@@ -213,9 +213,13 @@ async def _post_batch(trades: list[Trade], tonapi: TonAPI, publisher, s: Setting
                     dropped=len(cands) - _MAX_POSTS_PER_CYCLE)
         cands = sorted(cands, key=lambda t: t.usd, reverse=True)[:_MAX_POSTS_PER_CYCLE]  # keep biggest
     cands.sort(key=lambda t: t.ts)               # oldest first, chronological in the channel
+    posted = 0
     for tr in cands:
         try:
             if await handle_trade(tr, tonapi, publisher, s, buy_floor_usd):
+                posted += 1
                 await asyncio.sleep(1.1)          # stay under Telegram's channel post rate
         except Exception:  # noqa: BLE001
             log.exception("handle_trade_failed", token=tr.token_address)
+    if cands:
+        log.info("post_batch", candidates=len(cands), posted=posted)

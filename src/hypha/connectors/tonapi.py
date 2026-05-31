@@ -25,7 +25,7 @@ class TonAPI(BaseConnector):
     def __init__(self) -> None:
         s = get_settings()
         headers = {"Authorization": f"Bearer {s.tonapi_key}"} if s.tonapi_key else {}
-        super().__init__(s.tonapi_base, headers=headers)
+        super().__init__(s.tonapi_base, headers=headers, min_interval=s.tonapi_min_interval)
 
     async def jetton_info(self, addr: str) -> TokenInfo:
         d = await self.get(f"/v2/jettons/{addr}", cache_key=f"ta:info:{addr}", ttl=600)
