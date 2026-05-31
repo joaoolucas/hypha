@@ -113,7 +113,8 @@ def render_alert(
         holdings += [f"• ${_esc(b['symbol'])} {fmt_usd(b['usd'])}"
                      for b in ctx.top_bags if b.get("symbol")][:3]
         if holdings:
-            L += ["", "👜 Holdings:"]
+            hurl = f'https://tonviewer.com/{quote(to_friendly(ctx.address), safe="")}?section=tokens'
+            L += ["", f'👜 <a href="{hurl}">Holdings:</a>']   # tap-through to the whale's full holdings
             L += holdings
     if promoted:
         L.append(f"⭐ <i>added to the followed list — {ctx.big_buys} big buys lately</i>")

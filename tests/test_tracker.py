@@ -210,7 +210,7 @@ def test_render_shows_ton_in_holdings():
                         ton_balance=8791.0, ton_value_usd=45_600.0,
                         top_bags=[{"symbol": "REDO", "usd": 8000}])
     html, _ = render_alert(tr, ctx, _report("X"))
-    assert "Holdings:" in html
+    assert '>Holdings:</a>' in html and "tonviewer.com" in html   # Holdings links to the whale's tonviewer
     assert "• 8,791 TON ($45.6k)" in html                        # native TON shown in holdings
     assert "• $REDO $8.0k" in html
 
