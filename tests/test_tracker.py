@@ -240,7 +240,8 @@ def test_render_buy_card_and_buttons():
                trader="0:b", usd=285, ton_value=100.0)
     html, kb = render_alert(tr, TraderContext(address="0:b", is_whale=True, portfolio_usd=42_000),
                             _report("DUROVIUS"))
-    assert "🟢🐋 <b>WHALE BUY · 100 TON ($285) · $DUROVIUS</b> via DeDust" in html
+    assert "🟢🐋 <b>WHALE BUY · 100 TON ($285) · $DUROVIUS</b>" in html
+    assert 'via <a href="https://dedust.io/">DeDust</a>' in html   # venue links to the DEX
     assert "💰 Price " in html and "📈 24h " in html
     assert "🏦 MC " in html and "💧 Liq " in html and "📊 Vol " in html
     assert "💼 " in html and "Wallet" in html

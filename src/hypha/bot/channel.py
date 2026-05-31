@@ -16,7 +16,12 @@ from ..utils import fmt_price, fmt_usd, to_friendly
 # Trade-bot deep links (referral); the friendly token address is appended to the start payload.
 _DTRADE = "https://t.me/dtrade?start=25BSDKtN0o_"
 _REDOTRADE = "https://t.me/redotrade?start=mAJe4lm0_"
-_VENUE_NAME = {"stonfi": "STON.fi", "dedust": "DeDust", "uranus": "Uranus"}
+# venue -> (display name, site url). The name links to the DEX when a url is set.
+_VENUE = {
+    "dedust": ("DeDust", "https://dedust.io/"),
+    "stonfi": ("STON.fi", "https://ston.fi/"),
+    "uranus": ("Uranus", ""),
+}
 
 
 def _esc(s: str | None) -> str:
@@ -42,9 +47,13 @@ def _fmt_ton(ton: float) -> str:
     return f"{ton:,.0f}" if ton >= 10 else f"{ton:.1f}"
 
 
-def _venue_name(v: str) -> str:
+def _venue_html(v: str) -> str:
+    """Venue display, hyperlinked to the DEX site when known (e.g. DeDust → dedust.io)."""
     low = (v or "").lower()
-    return _VENUE_NAME.get(low, low.title() if low else "")
+    name, url = _VENUE.get(low, (low.title() if low else "", ""))
+    if not name:
+        return ""
+    return f'<a href="{url}">{name}</a>' if url else name
 
 
 def _size(trade: Trade) -> str:
@@ -82,7 +91,7 @@ def render_alert(
 ) -> tuple[str, InlineKeyboardMarkup]:
     t, d = report.token, report.dex
     addr = to_friendly(t.address, bounceable=True)
-    venue = _venue_name(trade.venue or (d.venues[0] if d and d.venues else ""))
+    venue = _venue_html(trade.venue or (d.venues[0] if d and d.venues else ""))
     head = _headline(trade, ctx)
     if venue:
         head = f"{head} via {venue}"
