@@ -102,6 +102,14 @@ async def test_small_buy_not_posted(captured, monkeypatch):
     assert captured == []
 
 
+async def test_stablecoin_token_not_posted(captured, monkeypatch):
+    _patch_enrich(monkeypatch, is_whale=True)              # whale, but the token bought is USDT
+    tr = _trade(usd=5000, trader="0:st", token="EQusdt", tx="st")
+    tr.token_symbol = "USDT"
+    assert await service.handle_trade(tr, None, None, _settings()) is False
+    assert captured == []
+
+
 async def test_non_whale_big_buy_not_posted(captured, monkeypatch):
     # the reported bug: a big buy by a non-whale, non-followed wallet must NOT post
     _patch_enrich(monkeypatch)                              # not a whale, not followed
