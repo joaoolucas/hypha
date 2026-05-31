@@ -107,7 +107,7 @@ def render_alert(
         L.append(line)
         holdings = []
         if ctx.ton_balance > 0:
-            holdings.append(f"• {_fmt_ton(ctx.ton_balance)} TON ({fmt_usd(ctx.ton_value_usd)})")
+            holdings.append(f"• {_fmt_ton(ctx.ton_balance)} $TON {fmt_usd(ctx.ton_value_usd).lstrip('$')}")
         holdings += [f"• ${_esc(b['symbol'])} {fmt_usd(b['usd'])}"
                      for b in ctx.top_bags if b.get("symbol")][:3]
         if holdings:
