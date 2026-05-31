@@ -1,6 +1,8 @@
-"""Whale-alert rendering + publishing (the channel side). The unit is a single trade, not an
-on-demand report. One scannable card: headline (who/what/size in TON), the token's market
-snapshot, the trader context (🐋/👣), CA + links, and a Buy button.
+"""Whale-alert rendering (the channel side). The unit is a single trade, not an on-demand
+report. render_alert returns (html, venue_emoji): the html uses tags common to both aiogram and
+Telethon (<b>/<a>/<code>) so either publisher can send it; venue_emoji is the (char, doc_id) of
+the branded custom emoji the userbot publisher upgrades the plain venue char into. Actions are
+inline links, not buttons (a userbot can't attach inline keyboards).
 """
 
 from __future__ import annotations
@@ -8,16 +10,10 @@ from __future__ import annotations
 import html
 from urllib.parse import quote
 
-import structlog
-from aiogram import Bot
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-
 from ..models import TokenReport, Trade, TraderContext, TradeSide
 from ..referral.router import build_buy
 from ..utils import fmt_usd, fmt_price, to_friendly
 from . import ui
-
-log = structlog.get_logger(__name__)
 
 
 def _esc(s: str | None) -> str:
@@ -44,15 +40,21 @@ def _fmt_ton(ton: float) -> str:
     return f"{ton:,.0f}" if ton >= 10 else f"{ton:.1f}"
 
 
-# Plain Unicode circles: Telegram won't render bot custom emoji in *channels* without a
-# Fragment-purchased username, so the branded NoNameDev logos (🟡=5391224493911876583,
-# 🔵=5388852301869916327) only fall back to these here. Kept as IDs in case we ever enable them.
-_VENUE_DISPLAY = {"dedust": "🟡 DeDust", "stonfi": "🔵 STON.fi"}
+# venue -> (base emoji char, display name, branded custom-emoji id from the NoNameDev set).
+# The char goes in the text; the userbot publisher upgrades it to the branded emoji via its id.
+_VENUE = {
+    "dedust": ("🟡", "DeDust", 5391224493911876583),
+    "stonfi": ("🔵", "STON.fi", 5388852301869916327),
+}
 
 
-def _venue(v: str) -> str:
+def _venue(v: str) -> tuple[str, tuple[str, int] | None]:
+    """Return (display_text, (emoji_char, custom_emoji_id) | None) for a venue."""
     low = (v or "").lower()
-    return _VENUE_DISPLAY.get(low, low.title() if low else "")
+    if low in _VENUE:
+        char, name, eid = _VENUE[low]
+        return f"{char} {name}", (char, eid)
+    return (low.title() if low else "", None)
 
 
 def _size(trade: Trade) -> str:
@@ -86,12 +88,14 @@ def render_alert(
     report: TokenReport,
     *,
     promoted: bool = False,
-) -> tuple[str, InlineKeyboardMarkup | None]:
+) -> tuple[str, tuple[str, int] | None]:
+    """Return (html, venue_emoji). venue_emoji is (char, custom_emoji_id) — the userbot publisher
+    upgrades the plain venue char in the text into the branded emoji; the bot path just shows it."""
     t, d = report.token, report.dex
     head = _headline(trade, ctx)
-    venue = _venue(trade.venue or (d.venues[0] if d and d.venues else ""))
-    if venue:
-        head = f"{head} - {venue}"
+    venue_text, venue_emoji = _venue(trade.venue or (d.venues[0] if d and d.venues else ""))
+    if venue_text:
+        head = f"{head} - {venue_text}"
     L: list[str] = [head]
 
     # market snapshot
@@ -121,37 +125,15 @@ def render_alert(
     # identity + links
     L += ["", f"<code>{_esc(t.address)}</code>", ui.viewer_links(t.address)]
 
-    kb_rows: list[list[InlineKeyboardButton]] = []
+    # actions as inline links (a userbot can't attach inline buttons)
+    chart_url = (f"https://www.geckoterminal.com/ton/pools/{quote(trade.pool_address, safe='')}"
+                 if trade.pool_address
+                 else f"https://www.geckoterminal.com/ton/tokens/{quote(t.address, safe='')}")
+    actions = []
     buy = build_buy(report)
     if buy:
-        kb_rows.append([InlineKeyboardButton(text=buy["label"], url=buy["url"])])
-    kb_rows.append([InlineKeyboardButton(
-        text="📊 Chart",
-        url=f"https://www.geckoterminal.com/ton/pools/{quote(trade.pool_address, safe='')}"
-        if trade.pool_address else f"https://www.geckoterminal.com/ton/tokens/{quote(t.address, safe='')}",
-    )])
-    return "\n".join(L), InlineKeyboardMarkup(inline_keyboard=kb_rows)
+        actions.append(f'🛒 <a href="{_esc(buy["url"])}">Buy</a>')
+    actions.append(f'📊 <a href="{_esc(chart_url)}">Chart</a>')
+    L.append(" · ".join(actions))
 
-
-def _channel_target(channel_id: str) -> str | int:
-    """Numeric ids (-100…) must be passed as int; @handles as str."""
-    s = channel_id.strip()
-    try:
-        return int(s)
-    except ValueError:
-        return s
-
-
-async def publish_alert(bot: Bot, channel_id: str, text: str, kb: InlineKeyboardMarkup | None) -> bool:
-    if not channel_id:
-        log.warning("no_alerts_channel_configured")
-        return False
-    try:
-        await bot.send_message(
-            _channel_target(channel_id), text,
-            reply_markup=kb, disable_web_page_preview=True,
-        )
-        return True
-    except Exception as exc:  # noqa: BLE001 — a single bad post must not kill the poller
-        log.warning("publish_failed", error=str(exc))
-        return False
+    return "\n".join(L), venue_emoji

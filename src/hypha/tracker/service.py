@@ -17,7 +17,7 @@ import structlog
 from ..analysis.discovery import hot_pools
 from ..analysis.service import analyze_token
 from ..analysis.trades import parse_pool_events, parse_tonapi_events, parse_uranus_events
-from ..bot.channel import publish_alert, render_alert
+from ..bot.channel import render_alert
 from ..config import Settings
 from ..connectors.dexscreener import DexScreener
 from ..connectors.geckoterminal import GeckoTerminal
@@ -31,6 +31,11 @@ from .enrich import enrich_trader
 log = structlog.get_logger(__name__)
 
 _MAX_POSTS_PER_CYCLE = 15        # flood guard; drops beyond this are logged, never silent
+
+
+async def publish_alert(publisher, channel: str, text: str, venue_emoji) -> bool:
+    """Send one rendered alert via the active publisher (userbot or bot)."""
+    return await publisher.publish(channel, text, venue_emoji)
 
 
 def _should_post(trade: Trade, ctx, s: Settings, buy_floor_usd: float) -> bool:
@@ -53,7 +58,7 @@ async def _price_in_usd(trade: Trade, report) -> float:
     return 0.0
 
 
-async def handle_trade(trade: Trade, tonapi: TonAPI, bot, s: Settings,
+async def handle_trade(trade: Trade, tonapi: TonAPI, publisher, s: Settings,
                        buy_floor_usd: float | None = None) -> bool:
     """Process one detected swap. Returns True if it was posted. `buy_floor_usd` is the effective
     USD buy threshold (TON-denominated, converted at the current TON price); falls back to config."""
@@ -81,8 +86,8 @@ async def handle_trade(trade: Trade, tonapi: TonAPI, bot, s: Settings,
     if not _should_post(trade, ctx, s, floor):
         return False
 
-    text, kb = render_alert(trade, ctx, report, promoted=promoted)
-    posted = await publish_alert(bot, s.alerts_channel_id, text, kb)
+    text, venue_emoji = render_alert(trade, ctx, report, promoted=promoted)
+    posted = await publish_alert(publisher, s.alerts_channel_id, text, venue_emoji)
     if posted:
         await _log_alert(trade, ctx, report)
     return posted
@@ -124,7 +129,7 @@ async def discovery_cycle(gecko: GeckoTerminal, s: Settings) -> int:
     return len(pools)
 
 
-async def trade_cycle(gecko: GeckoTerminal, tonapi: TonAPI, bot, s: Settings) -> None:
+async def trade_cycle(gecko: GeckoTerminal, tonapi: TonAPI, publisher, s: Settings) -> None:
     """Token-centric: read each hot pool's swaps from TonAPI (reliable) and alert on big ones."""
     pools = await state.load_hot_pools()
     if not pools:
@@ -153,7 +158,7 @@ async def trade_cycle(gecko: GeckoTerminal, tonapi: TonAPI, bot, s: Settings) ->
     fresh = [t for b in batches if not isinstance(b, BaseException) for t in b]
     log.info("trade_cycle", pools=len(pools), fresh=len(fresh),
              max_usd=round(max((t.usd for t in fresh), default=0.0)), buy_floor=round(buy_floor))
-    await _post_batch(fresh, tonapi, bot, s, buy_floor)
+    await _post_batch(fresh, tonapi, publisher, s, buy_floor)
 
 
 def _buy_floor(s: Settings, ton_usd: float) -> float:
@@ -169,7 +174,7 @@ async def _ton_price(tonapi: TonAPI) -> float:
         return 0.0
 
 
-async def follow_cycle(gecko: GeckoTerminal, tonapi: TonAPI, bot, s: Settings) -> None:
+async def follow_cycle(gecko: GeckoTerminal, tonapi: TonAPI, publisher, s: Settings) -> None:
     wallets = (await state.followed_list())[: s.followed_max]
     if not wallets:
         return
@@ -190,10 +195,10 @@ async def follow_cycle(gecko: GeckoTerminal, tonapi: TonAPI, bot, s: Settings) -
 
     batches = await asyncio.gather(*(_fresh(w) for w in wallets), return_exceptions=True)
     fresh = [t for b in batches if not isinstance(b, BaseException) for t in b]
-    await _post_batch(fresh, tonapi, bot, s, buy_floor)
+    await _post_batch(fresh, tonapi, publisher, s, buy_floor)
 
 
-async def _post_batch(trades: list[Trade], tonapi: TonAPI, bot, s: Settings,
+async def _post_batch(trades: list[Trade], tonapi: TonAPI, publisher, s: Settings,
                       buy_floor_usd: float) -> None:
     now = time.time()
     floor = min(buy_floor_usd, s.sell_alert_usd)
@@ -209,7 +214,7 @@ async def _post_batch(trades: list[Trade], tonapi: TonAPI, bot, s: Settings,
     cands.sort(key=lambda t: t.ts)               # oldest first, chronological in the channel
     for tr in cands:
         try:
-            if await handle_trade(tr, tonapi, bot, s, buy_floor_usd):
+            if await handle_trade(tr, tonapi, publisher, s, buy_floor_usd):
                 await asyncio.sleep(1.1)          # stay under Telegram's channel post rate
         except Exception:  # noqa: BLE001
             log.exception("handle_trade_failed", token=tr.token_address)
