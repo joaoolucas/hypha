@@ -38,14 +38,14 @@ async def publish_alert(publisher, channel: str, text: str, keyboard) -> bool:
     return await publisher.publish(channel, text, keyboard)
 
 
-def _should_post(trade: Trade, ctx, s: Settings, buy_floor_usd: float) -> bool:
+def _should_post(trade: Trade, ctx, buy_floor_usd: float, sell_floor_usd: float) -> bool:
     """Buys post only for whales (by portfolio) clearing the buy floor — no followed-only buys.
     Sells post for whales or followed wallets clearing the sell floor."""
     if ctx.excluded:
         return False
     if trade.side == TradeSide.BUY:
         return ctx.is_whale and trade.usd >= buy_floor_usd
-    return (ctx.is_whale or ctx.is_followed) and trade.usd >= s.sell_alert_usd
+    return (ctx.is_whale or ctx.is_followed) and trade.usd >= sell_floor_usd
 
 
 async def _price_in_usd(trade: Trade, report) -> float:
@@ -58,10 +58,11 @@ async def _price_in_usd(trade: Trade, report) -> float:
 
 
 async def handle_trade(trade: Trade, tonapi: TonAPI, publisher, s: Settings,
-                       buy_floor_usd: float | None = None) -> bool:
-    """Process one detected swap. Returns True if it was posted. `buy_floor_usd` is the effective
-    USD buy threshold (TON-denominated, converted at the current TON price); falls back to config."""
+                       buy_floor_usd: float | None = None, sell_floor_usd: float | None = None) -> bool:
+    """Process one detected swap. Returns True if it was posted. The floors are the effective USD
+    buy/sell thresholds (TON-denominated, converted at the current TON price); fall back to config."""
     floor = buy_floor_usd if buy_floor_usd is not None else s.buy_alert_usd
+    sell_floor = sell_floor_usd if sell_floor_usd is not None else s.sell_alert_usd
     if not trade.token_address or is_quote_asset(trade.token_symbol) or is_lp_or_staked(trade.token_symbol):
         return False                                  # ignore stables, TON/wrapped-TON, LP and staked tokens
     if not await state.is_new_op(trade, s.alert_dedup_ttl):
@@ -87,7 +88,7 @@ async def handle_trade(trade: Trade, tonapi: TonAPI, publisher, s: Settings,
             ctx.is_followed = promoted = True
             log.info("wallet_promoted", trader=trade.trader, buys=ctx.big_buys)
 
-    if not _should_post(trade, ctx, s, floor):
+    if not _should_post(trade, ctx, floor, sell_floor):
         return False
 
     text, keyboard = render_alert(trade, ctx, report, promoted=promoted)
@@ -140,7 +141,7 @@ async def trade_cycle(gecko: GeckoTerminal, tonapi: TonAPI, publisher, s: Settin
         await discovery_cycle(gecko, s)
         pools = await state.load_hot_pools()
     ton_usd = await _ton_price(tonapi)
-    buy_floor = _buy_floor(s, ton_usd)
+    buy_floor, sell_floor = _buy_floor(s, ton_usd), _sell_floor(s, ton_usd)
     sem = asyncio.Semaphore(s.trade_concurrency)
 
     async def _fresh(pool):
@@ -161,13 +162,19 @@ async def trade_cycle(gecko: GeckoTerminal, tonapi: TonAPI, publisher, s: Settin
     batches = await asyncio.gather(*(_fresh(p) for p in pools), return_exceptions=True)
     fresh = [t for b in batches if not isinstance(b, BaseException) for t in b]
     log.info("trade_cycle", pools=len(pools), fresh=len(fresh),
-             max_usd=round(max((t.usd for t in fresh), default=0.0)), buy_floor=round(buy_floor))
-    await _post_batch(fresh, tonapi, publisher, s, buy_floor)
+             max_usd=round(max((t.usd for t in fresh), default=0.0)),
+             buy_floor=round(buy_floor), sell_floor=round(sell_floor))
+    await _post_batch(fresh, tonapi, publisher, s, buy_floor, sell_floor)
 
 
 def _buy_floor(s: Settings, ton_usd: float) -> float:
     """Effective USD buy threshold: the TON-denominated floor priced at the current TON rate."""
     return s.buy_alert_ton * ton_usd if ton_usd > 0 else s.buy_alert_usd
+
+
+def _sell_floor(s: Settings, ton_usd: float) -> float:
+    """Effective USD sell threshold: the TON-denominated floor priced at the current TON rate."""
+    return s.sell_alert_ton * ton_usd if ton_usd > 0 else s.sell_alert_usd
 
 
 async def _ton_price(tonapi: TonAPI) -> float:
@@ -184,7 +191,8 @@ async def follow_cycle(gecko: GeckoTerminal, tonapi: TonAPI, publisher, s: Setti
         return
     # Followed buys are no longer posted (whale-only buys); the follow loop now surfaces a followed
     # wallet's whale buys in cold tokens and its big sells. Same floors as the token-centric loop.
-    buy_floor = _buy_floor(s, await _ton_price(tonapi))
+    ton_usd = await _ton_price(tonapi)
+    buy_floor, sell_floor = _buy_floor(s, ton_usd), _sell_floor(s, ton_usd)
     sem = asyncio.Semaphore(s.trade_concurrency)
 
     async def _fresh(wallet):
@@ -199,13 +207,13 @@ async def follow_cycle(gecko: GeckoTerminal, tonapi: TonAPI, publisher, s: Setti
 
     batches = await asyncio.gather(*(_fresh(w) for w in wallets), return_exceptions=True)
     fresh = [t for b in batches if not isinstance(b, BaseException) for t in b]
-    await _post_batch(fresh, tonapi, publisher, s, buy_floor)
+    await _post_batch(fresh, tonapi, publisher, s, buy_floor, sell_floor)
 
 
 async def _post_batch(trades: list[Trade], tonapi: TonAPI, publisher, s: Settings,
-                      buy_floor_usd: float) -> None:
+                      buy_floor_usd: float, sell_floor_usd: float) -> None:
     now = time.time()
-    floor = min(buy_floor_usd, s.sell_alert_usd)
+    floor = min(buy_floor_usd, sell_floor_usd)
     # Only timely, plausibly-sized trades: drop the restart backlog (stale ts) and clear obvious
     # sub-threshold noise before the flood cap. usd==0 means unpriced (no TON leg) — keep it so
     # handle_trade can price it from market data.
@@ -219,7 +227,7 @@ async def _post_batch(trades: list[Trade], tonapi: TonAPI, publisher, s: Setting
     posted = 0
     for tr in cands:
         try:
-            if await handle_trade(tr, tonapi, publisher, s, buy_floor_usd):
+            if await handle_trade(tr, tonapi, publisher, s, buy_floor_usd, sell_floor_usd):
                 posted += 1
                 await asyncio.sleep(1.1)          # stay under Telegram's channel post rate
         except Exception:  # noqa: BLE001

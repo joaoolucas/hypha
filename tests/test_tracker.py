@@ -215,6 +215,14 @@ async def test_handle_respects_explicit_buy_floor(captured, monkeypatch):
     assert await service.handle_trade(above, None, None, _settings(), buy_floor_usd=400) is True
 
 
+async def test_handle_respects_explicit_sell_floor(captured, monkeypatch):
+    _patch_enrich(monkeypatch, is_whale=True)
+    below = _trade(side=TradeSide.SELL, usd=800, trader="0:s9", token="EQs9", tx="s9")
+    assert await service.handle_trade(below, None, None, _settings(), sell_floor_usd=950) is False
+    above = _trade(side=TradeSide.SELL, usd=1200, trader="0:s10", token="EQs10", tx="s10")
+    assert await service.handle_trade(above, None, None, _settings(), sell_floor_usd=950) is True
+
+
 async def test_recurring_buyer_promoted_but_buy_not_posted(captured, monkeypatch):
     # promotion still records the wallet (for future sell-tracking), but the buy itself isn't
     # posted now that followed buys are removed and the wallet isn't a whale.
