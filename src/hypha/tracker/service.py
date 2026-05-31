@@ -39,14 +39,13 @@ async def publish_alert(publisher, channel: str, text: str, emojis) -> bool:
 
 
 def _should_post(trade: Trade, ctx, s: Settings, buy_floor_usd: float) -> bool:
-    """Whale-only channel: post a trade only if the trader is a whale (by portfolio) or a
-    wallet we follow. Size is a secondary filter — whale buys must clear the buy floor; followed
-    wallets post any buy (the point of following them); sells must clear the sell floor."""
-    if ctx.excluded or not (ctx.is_whale or ctx.is_followed):
+    """Buys post only for whales (by portfolio) clearing the buy floor — no followed-only buys.
+    Sells post for whales or followed wallets clearing the sell floor."""
+    if ctx.excluded:
         return False
     if trade.side == TradeSide.BUY:
-        return ctx.is_followed or trade.usd >= buy_floor_usd
-    return trade.usd >= s.sell_alert_usd
+        return ctx.is_whale and trade.usd >= buy_floor_usd
+    return (ctx.is_whale or ctx.is_followed) and trade.usd >= s.sell_alert_usd
 
 
 async def _price_in_usd(trade: Trade, report) -> float:
@@ -178,9 +177,9 @@ async def follow_cycle(gecko: GeckoTerminal, tonapi: TonAPI, publisher, s: Setti
     wallets = (await state.followed_list())[: s.followed_max]
     if not wallets:
         return
-    # These wallets are already vetted smart money, so post their buys at any size (floor 0);
-    # _should_post still gates sells by the sell floor.
-    buy_floor = 0.0
+    # Followed buys are no longer posted (whale-only buys); the follow loop now surfaces a followed
+    # wallet's whale buys in cold tokens and its big sells. Same floors as the token-centric loop.
+    buy_floor = _buy_floor(s, await _ton_price(tonapi))
     sem = asyncio.Semaphore(s.trade_concurrency)
 
     async def _fresh(wallet):

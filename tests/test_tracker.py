@@ -118,9 +118,16 @@ async def test_small_sell_dropped_big_sell_posted(captured, monkeypatch):
     assert await service.handle_trade(big, None, None, _settings()) is True
 
 
-async def test_followed_buy_posts_regardless_of_size(captured, monkeypatch):
-    _patch_enrich(monkeypatch, is_followed=True)
-    tr = _trade(usd=300, trader="0:fbuy", token="EQfb", tx="fb")   # below buy floor
+async def test_followed_buy_not_posted(captured, monkeypatch):
+    _patch_enrich(monkeypatch, is_followed=True)                   # followed but not a whale
+    tr = _trade(usd=4000, trader="0:fbuy", token="EQfb", tx="fb")
+    assert await service.handle_trade(tr, None, None, _settings()) is False  # followed buys removed
+    assert captured == []
+
+
+async def test_followed_sell_still_posts(captured, monkeypatch):
+    _patch_enrich(monkeypatch, is_followed=True)                   # followed, not whale
+    tr = _trade(side=TradeSide.SELL, usd=12000, trader="0:fsell", token="EQfs", tx="fs")
     assert await service.handle_trade(tr, None, None, _settings()) is True
 
 
@@ -138,13 +145,15 @@ async def test_handle_respects_explicit_buy_floor(captured, monkeypatch):
     assert await service.handle_trade(above, None, None, _settings(), buy_floor_usd=400) is True
 
 
-async def test_recurring_buyer_auto_promoted(captured, monkeypatch):
-    _patch_enrich(monkeypatch)                              # arrives unknown
+async def test_recurring_buyer_promoted_but_buy_not_posted(captured, monkeypatch):
+    # promotion still records the wallet (for future sell-tracking), but the buy itself isn't
+    # posted now that followed buys are removed and the wallet isn't a whale.
+    _patch_enrich(monkeypatch)                              # arrives unknown, not a whale
     s = _settings(promote_min_buys=1)
     tr = _trade(usd=2000, trader="0:promote", token="EQpr", tx="pr")
-    assert await service.handle_trade(tr, None, None, s) is True
+    assert await service.handle_trade(tr, None, None, s) is False
     assert await state.is_followed("0:promote") is True     # crossed the threshold -> followed
-    assert "followed list" in captured[0]
+    assert captured == []
 
 
 # ── rendering ───────────────────────────────────────────────────────────────────
