@@ -16,7 +16,7 @@ from ..utils import fmt_usd, fmt_price, to_friendly
 
 # Branded explorer emoji from the NoNameDev set (char shown as fallback; userbot upgrades it).
 _LINK_EMOJI = {
-    "tonviewer": ("👁", 5366499359326247547),
+    "tonviewer": ("🔷", 5364245841525645356),
     "dexscreener": ("🦅", 5391144822268537893),
 }
 

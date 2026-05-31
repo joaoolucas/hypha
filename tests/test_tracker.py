@@ -155,6 +155,7 @@ def test_render_buy_shows_ton_size():
     assert "🟢 <b>BUY · 100 TON ($285) · $DUROVIUS</b>" in text
     assert "🟡 DeDust" in text                                    # venue (report dex is dedust)
     assert ("🟡", 5391224493911876583) in emojis                 # branded venue emoji
+    assert ("🔷", 5364245841525645356) in emojis                 # branded Tonviewer emoji
     assert ("🦅", 5391144822268537893) in emojis                 # branded DexScreener emoji
     assert "Tonviewer</a>" in text and "DexScreener</a>" in text
     assert "GeckoTerminal" not in text and "Chart</a>" not in text  # removed
