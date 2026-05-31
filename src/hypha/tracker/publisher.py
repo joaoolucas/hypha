@@ -28,7 +28,7 @@ class BotPublisher:
     def __init__(self, bot):
         self.bot = bot
 
-    async def publish(self, channel: str, html: str, venue_emoji: tuple[str, int] | None) -> bool:
+    async def publish(self, channel: str, html: str, emojis: list[tuple[str, int]]) -> bool:
         if not channel:
             log.warning("no_alerts_channel_configured")
             return False
@@ -57,15 +57,14 @@ class UserbotPublisher:
         if not await self._client.is_user_authorized():
             raise RuntimeError("userbot session is not authorized (regenerate the session string)")
 
-    async def publish(self, channel: str, html: str, venue_emoji: tuple[str, int] | None) -> bool:
+    async def publish(self, channel: str, html: str, emojis: list[tuple[str, int]]) -> bool:
         if not channel:
             log.warning("no_alerts_channel_configured")
             return False
         from telethon.extensions import html as tl_html
         from telethon.tl.types import MessageEntityCustomEmoji
         text, entities = tl_html.parse(html)
-        if venue_emoji:
-            char, doc_id = venue_emoji
+        for char, doc_id in emojis or []:
             idx = text.find(char)
             if idx != -1:
                 offset = len(text[:idx].encode("utf-16-le")) // 2

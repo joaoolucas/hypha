@@ -33,9 +33,9 @@ log = structlog.get_logger(__name__)
 _MAX_POSTS_PER_CYCLE = 15        # flood guard; drops beyond this are logged, never silent
 
 
-async def publish_alert(publisher, channel: str, text: str, venue_emoji) -> bool:
+async def publish_alert(publisher, channel: str, text: str, emojis) -> bool:
     """Send one rendered alert via the active publisher (userbot or bot)."""
-    return await publisher.publish(channel, text, venue_emoji)
+    return await publisher.publish(channel, text, emojis)
 
 
 def _should_post(trade: Trade, ctx, s: Settings, buy_floor_usd: float) -> bool:
@@ -86,8 +86,8 @@ async def handle_trade(trade: Trade, tonapi: TonAPI, publisher, s: Settings,
     if not _should_post(trade, ctx, s, floor):
         return False
 
-    text, venue_emoji = render_alert(trade, ctx, report, promoted=promoted)
-    posted = await publish_alert(publisher, s.alerts_channel_id, text, venue_emoji)
+    text, emojis = render_alert(trade, ctx, report, promoted=promoted)
+    posted = await publish_alert(publisher, s.alerts_channel_id, text, emojis)
     if posted:
         await _log_alert(trade, ctx, report)
     return posted

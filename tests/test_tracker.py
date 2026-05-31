@@ -151,17 +151,19 @@ async def test_recurring_buyer_auto_promoted(captured, monkeypatch):
 def test_render_buy_shows_ton_size():
     tr = Trade(side=TradeSide.BUY, token_address="EQd", token_symbol="DUROVIUS",
                trader="0:b", usd=285, ton_value=100.0)
-    text, venue_emoji = render_alert(tr, TraderContext(address="0:b"), _report("DUROVIUS"))
+    text, emojis = render_alert(tr, TraderContext(address="0:b"), _report("DUROVIUS"))
     assert "🟢 <b>BUY · 100 TON ($285) · $DUROVIUS</b>" in text
-    assert "🟡 DeDust" in text                           # plain char in text (report dex is dedust)
-    assert venue_emoji == ("🟡", 5391224493911876583)    # branded custom emoji the userbot upgrades to
-    assert "Chart</a>" in text                          # actions are inline links, not buttons
-    assert "Hypha" not in text                          # score block removed
+    assert "🟡 DeDust" in text                                    # venue (report dex is dedust)
+    assert ("🟡", 5391224493911876583) in emojis                 # branded venue emoji
+    assert ("🦅", 5391144822268537893) in emojis                 # branded DexScreener emoji
+    assert "Tonviewer</a>" in text and "DexScreener</a>" in text
+    assert "GeckoTerminal" not in text and "Chart</a>" not in text  # removed
+    assert "Hypha" not in text
 
 
 def test_render_sell_whale_card():
     tr = _trade(side=TradeSide.SELL, usd=14000, token="EQt", trader="0:w")
     ctx = TraderContext(address="0:w", is_whale=True, portfolio_usd=200_000)
-    text, venue_emoji = render_alert(tr, ctx, _report("CAT"))
+    text, emojis = render_alert(tr, ctx, _report("CAT"))
     assert "WHALE SELL" in text and "$14.0k" in text
     assert "Hypha" not in text

@@ -13,7 +13,12 @@ from urllib.parse import quote
 from ..models import TokenReport, Trade, TraderContext, TradeSide
 from ..referral.router import build_buy
 from ..utils import fmt_usd, fmt_price, to_friendly
-from . import ui
+
+# Branded explorer emoji from the NoNameDev set (char shown as fallback; userbot upgrades it).
+_LINK_EMOJI = {
+    "tonviewer": ("👁", 5366499359326247547),
+    "dexscreener": ("🦅", 5391144822268537893),
+}
 
 
 def _esc(s: str | None) -> str:
@@ -88,9 +93,9 @@ def render_alert(
     report: TokenReport,
     *,
     promoted: bool = False,
-) -> tuple[str, tuple[str, int] | None]:
-    """Return (html, venue_emoji). venue_emoji is (char, custom_emoji_id) — the userbot publisher
-    upgrades the plain venue char in the text into the branded emoji; the bot path just shows it."""
+) -> tuple[str, list[tuple[str, int]]]:
+    """Return (html, emojis). emojis is a list of (char, custom_emoji_id) the userbot publisher
+    upgrades to branded emoji (venue + explorer links); the bot path shows the plain chars."""
     t, d = report.token, report.dex
     head = _headline(trade, ctx)
     venue_text, venue_emoji = _venue(trade.venue or (d.venues[0] if d and d.venues else ""))
@@ -122,18 +127,18 @@ def render_alert(
     if promoted:
         L.append(f"⭐ <i>added to the followed list — {ctx.big_buys} big buys lately</i>")
 
-    # identity + links
-    L += ["", f"<code>{_esc(t.address)}</code>", ui.viewer_links(t.address)]
-
-    # actions as inline links (a userbot can't attach inline buttons)
-    chart_url = (f"https://www.geckoterminal.com/ton/pools/{quote(trade.pool_address, safe='')}"
-                 if trade.pool_address
-                 else f"https://www.geckoterminal.com/ton/tokens/{quote(t.address, safe='')}")
-    actions = []
+    # identity + footer: Buy + Tonviewer + DexScreener (branded), always friendly address
+    addr = to_friendly(t.address, bounceable=True)
+    a = quote(addr, safe="")
+    tv_char, tv_id = _LINK_EMOJI["tonviewer"]
+    dx_char, dx_id = _LINK_EMOJI["dexscreener"]
+    foot = []
     buy = build_buy(report)
     if buy:
-        actions.append(f'🛒 <a href="{_esc(buy["url"])}">Buy</a>')
-    actions.append(f'📊 <a href="{_esc(chart_url)}">Chart</a>')
-    L.append(" · ".join(actions))
+        foot.append(f'🛒 <a href="{_esc(buy["url"])}">Buy</a>')
+    foot.append(f'{tv_char} <a href="https://tonviewer.com/{a}">Tonviewer</a>')
+    foot.append(f'{dx_char} <a href="https://dexscreener.com/ton/{a}">DexScreener</a>')
+    L += ["", f"<code>{_esc(addr)}</code>", " · ".join(foot)]
 
-    return "\n".join(L), venue_emoji
+    emojis = [e for e in (venue_emoji, (tv_char, tv_id), (dx_char, dx_id)) if e]
+    return "\n".join(L), emojis

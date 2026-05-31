@@ -16,6 +16,7 @@ import structlog
 from ..config import get_settings
 from ..connectors.geckoterminal import GeckoTerminal
 from ..models import HotPool
+from ..utils import to_friendly
 from .dex import _norm_venue
 
 log = structlog.get_logger(__name__)
@@ -121,7 +122,8 @@ def normalize_dexscreener(pairs: list[dict], reason: str = "dexscreener") -> lis
         token_addr, token_sym, paired, token_is_base = picked
         out.append(HotPool(
             pool_address=pool_addr,
-            token_address=token_addr,
+            token_address=to_friendly(token_addr, bounceable=True),  # DexScreener gives raw 0:hex
+
             token_symbol=token_sym,
             quote_symbol=paired,
             token_is_base=token_is_base,
