@@ -118,6 +118,16 @@ def test_pool_event_buy_sized_by_ton_leg():
     assert t.token_amount == 5.0             # amount_out 5e9 / 1e9
     assert t.trader == "0:" + "bb" * 32      # from user_wallet, not the queried pool
     assert t.token_symbol == "SHROOM"
+    assert t.is_launchpad is False           # established DeDust pool -> regular buy floor
+
+
+def test_pool_event_marks_fresh_launch_as_launchpad():
+    # a pool surfaced from the "new" feed gets the launchpad tag (low buy floor applies)
+    fresh = HotPool(pool_address="EQp", token_address=TOKEN_RAW, token_symbol="SHROOM",
+                    venue="dedust", reason="new")
+    jout = {"address": TOKEN_RAW, "symbol": "SHROOM", "decimals": 9}
+    trades = parse_pool_events([_pool_event(jout=jout, ton_in=2_000_000_000)], fresh, ton_usd=5.0)
+    assert len(trades) == 1 and trades[0].is_launchpad is True
 
 
 def test_pool_event_sell_sized_by_ton_leg():
@@ -177,6 +187,7 @@ def test_parse_uranus_buy_event():
     assert t.usd == 49.5                   # 24.75 × $2
     assert t.token_symbol == "ROBIN" and t.source == "uranus"
     assert t.trader == "0:" + "bb" * 32
+    assert t.is_launchpad is True          # Uranus is a launchpad DEX -> low buy floor
 
 
 def test_parse_uranus_sell_event():

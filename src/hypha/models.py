@@ -181,6 +181,7 @@ class Trade(BaseModel):
     tx_hash: str = ""
     ts: float = 0.0                    # epoch seconds (block time)
     source: str = "gecko"              # gecko | tonapi
+    is_launchpad: bool = False         # fresh launch / launchpad DEX — the lower buy floor applies
 
 
 class TraderContext(BaseModel):

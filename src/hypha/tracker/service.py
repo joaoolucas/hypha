@@ -58,11 +58,16 @@ async def _price_in_usd(trade: Trade, report) -> float:
 
 
 async def handle_trade(trade: Trade, tonapi: TonAPI, publisher, s: Settings,
-                       buy_floor_usd: float | None = None, sell_floor_usd: float | None = None) -> bool:
+                       buy_floor_usd: float | None = None, sell_floor_usd: float | None = None,
+                       launchpad_buy_floor_usd: float | None = None) -> bool:
     """Process one detected swap. Returns True if it was posted. The floors are the effective USD
-    buy/sell thresholds (TON-denominated, converted at the current TON price); fall back to config."""
-    floor = buy_floor_usd if buy_floor_usd is not None else s.buy_alert_usd
+    buy/sell thresholds (TON-denominated, converted at the current TON price); fall back to config.
+    Launchpad/new tokens (trade.is_launchpad) use the lower launchpad buy floor, since whales ape
+    those in small clips; the whale gate still applies."""
     sell_floor = sell_floor_usd if sell_floor_usd is not None else s.sell_alert_usd
+    regular_buy = buy_floor_usd if buy_floor_usd is not None else s.buy_alert_usd
+    launchpad_buy = launchpad_buy_floor_usd if launchpad_buy_floor_usd is not None else s.launchpad_buy_alert_usd
+    buy_floor = launchpad_buy if trade.is_launchpad else regular_buy
     if not trade.token_address or is_quote_asset(trade.token_symbol) or is_lp_or_staked(trade.token_symbol):
         return False                                  # ignore stables, TON/wrapped-TON, LP and staked tokens
     if not await state.is_new_op(trade, s.alert_dedup_ttl):
@@ -77,7 +82,7 @@ async def handle_trade(trade: Trade, tonapi: TonAPI, publisher, s: Settings,
 
     # Auto-promotion: a wallet that repeatedly makes sized buys is smart money worth following
     # (tracked for its future sells), even if its portfolio is light.
-    if trade.side == TradeSide.BUY and trade.usd >= floor and not ctx.excluded:
+    if trade.side == TradeSide.BUY and trade.usd >= buy_floor and not ctx.excluded:
         ctx.big_buys = await state.record_big_buy(trade.trader, s.promote_window_secs)
         if (s.follow_enabled and not ctx.is_followed
                 and ctx.big_buys >= s.promote_min_buys
@@ -86,7 +91,7 @@ async def handle_trade(trade: Trade, tonapi: TonAPI, publisher, s: Settings,
             ctx.is_followed = True
             log.info("wallet_promoted", trader=trade.trader, buys=ctx.big_buys)
 
-    if not _should_post(trade, ctx, floor, sell_floor):
+    if not _should_post(trade, ctx, buy_floor, sell_floor):
         return False
 
     text, keyboard = render_alert(trade, ctx, report)
@@ -140,6 +145,7 @@ async def trade_cycle(gecko: GeckoTerminal, tonapi: TonAPI, publisher, s: Settin
         pools = await state.load_hot_pools()
     ton_usd = await _ton_price(tonapi)
     buy_floor, sell_floor = _buy_floor(s, ton_usd), _sell_floor(s, ton_usd)
+    lp_buy_floor = _launchpad_buy_floor(s, ton_usd)
     sem = asyncio.Semaphore(s.trade_concurrency)
 
     async def _fresh(pool):
@@ -161,13 +167,18 @@ async def trade_cycle(gecko: GeckoTerminal, tonapi: TonAPI, publisher, s: Settin
     fresh = [t for b in batches if not isinstance(b, BaseException) for t in b]
     log.info("trade_cycle", pools=len(pools), fresh=len(fresh),
              max_usd=round(max((t.usd for t in fresh), default=0.0)),
-             buy_floor=round(buy_floor), sell_floor=round(sell_floor))
-    await _post_batch(fresh, tonapi, publisher, s, buy_floor, sell_floor)
+             buy_floor=round(buy_floor), lp_buy_floor=round(lp_buy_floor), sell_floor=round(sell_floor))
+    await _post_batch(fresh, tonapi, publisher, s, buy_floor, sell_floor, lp_buy_floor)
 
 
 def _buy_floor(s: Settings, ton_usd: float) -> float:
     """Effective USD buy threshold: the TON-denominated floor priced at the current TON rate."""
     return s.buy_alert_ton * ton_usd if ton_usd > 0 else s.buy_alert_usd
+
+
+def _launchpad_buy_floor(s: Settings, ton_usd: float) -> float:
+    """Lower buy threshold for launchpad/new tokens (Uranus + fresh launches), where whales ape small."""
+    return s.launchpad_buy_alert_ton * ton_usd if ton_usd > 0 else s.launchpad_buy_alert_usd
 
 
 def _sell_floor(s: Settings, ton_usd: float) -> float:
@@ -191,6 +202,7 @@ async def follow_cycle(gecko: GeckoTerminal, tonapi: TonAPI, publisher, s: Setti
     # wallet's whale buys in cold tokens and its big sells. Same floors as the token-centric loop.
     ton_usd = await _ton_price(tonapi)
     buy_floor, sell_floor = _buy_floor(s, ton_usd), _sell_floor(s, ton_usd)
+    lp_buy_floor = _launchpad_buy_floor(s, ton_usd)
     sem = asyncio.Semaphore(s.trade_concurrency)
 
     async def _fresh(wallet):
@@ -205,18 +217,25 @@ async def follow_cycle(gecko: GeckoTerminal, tonapi: TonAPI, publisher, s: Setti
 
     batches = await asyncio.gather(*(_fresh(w) for w in wallets), return_exceptions=True)
     fresh = [t for b in batches if not isinstance(b, BaseException) for t in b]
-    await _post_batch(fresh, tonapi, publisher, s, buy_floor, sell_floor)
+    await _post_batch(fresh, tonapi, publisher, s, buy_floor, sell_floor, lp_buy_floor)
 
 
 async def _post_batch(trades: list[Trade], tonapi: TonAPI, publisher, s: Settings,
-                      buy_floor_usd: float, sell_floor_usd: float) -> None:
+                      buy_floor_usd: float, sell_floor_usd: float, launchpad_buy_floor_usd: float) -> None:
     now = time.time()
-    floor = min(buy_floor_usd, sell_floor_usd)
-    # Only timely, plausibly-sized trades: drop the restart backlog (stale ts) and clear obvious
-    # sub-threshold noise before the flood cap. usd==0 means unpriced (no TON leg) — keep it so
-    # handle_trade can price it from market data.
-    cands = [t for t in trades
-             if (now - t.ts) <= s.trade_max_age_secs and (t.usd == 0 or t.usd >= floor)]
+
+    def _keep(t: Trade) -> bool:
+        # Only timely, plausibly-sized trades: drop the restart backlog (stale ts) and clear obvious
+        # sub-threshold noise before the flood cap. usd==0 means unpriced (no TON leg) — keep it so
+        # handle_trade can price it from market data. Launchpad trades use the lower buy floor.
+        if (now - t.ts) > s.trade_max_age_secs:
+            return False
+        if t.usd == 0:
+            return True
+        eff_buy = launchpad_buy_floor_usd if t.is_launchpad else buy_floor_usd
+        return t.usd >= min(eff_buy, sell_floor_usd)
+
+    cands = [t for t in trades if _keep(t)]
     if len(cands) > _MAX_POSTS_PER_CYCLE:
         log.warning("post_cap_hit", found=len(cands), cap=_MAX_POSTS_PER_CYCLE,
                     dropped=len(cands) - _MAX_POSTS_PER_CYCLE)
@@ -225,7 +244,8 @@ async def _post_batch(trades: list[Trade], tonapi: TonAPI, publisher, s: Setting
     posted = 0
     for tr in cands:
         try:
-            if await handle_trade(tr, tonapi, publisher, s, buy_floor_usd, sell_floor_usd):
+            if await handle_trade(tr, tonapi, publisher, s, buy_floor_usd, sell_floor_usd,
+                                  launchpad_buy_floor_usd):
                 posted += 1
                 await asyncio.sleep(1.1)          # stay under Telegram's channel post rate
         except Exception:  # noqa: BLE001

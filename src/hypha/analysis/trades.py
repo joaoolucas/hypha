@@ -92,6 +92,12 @@ def parse_gecko_trades(
 
 
 _NANOTON = 10 ** 9
+_LAUNCHPAD_REASONS = {"new", "dexscreener"}
+
+
+def _is_launchpad_pool(pool) -> bool:
+    """Fresh launch / launchpad-DEX pool — the low launchpad buy floor applies (whales ape small)."""
+    return getattr(pool, "venue", "") == "uranus" or getattr(pool, "reason", "") in _LAUNCHPAD_REASONS
 
 
 def parse_pool_events(events: list[dict], pool, ton_usd: float = 0.0) -> list[Trade]:
@@ -100,6 +106,7 @@ def parse_pool_events(events: list[dict], pool, ton_usd: float = 0.0) -> list[Tr
     which side of the swap carries the pool's token. Sized by the TON leg (× ton_usd); jetton/jetton
     or pTON-paired swaps leave usd 0 to be priced from the token's market data later."""
     token_raw = to_raw(pool.token_address)
+    launchpad = _is_launchpad_pool(pool)
     out: list[Trade] = []
     for ev in events:
         ts = float(ev.get("timestamp", 0) or 0)
@@ -138,6 +145,7 @@ def parse_pool_events(events: list[dict], pool, ton_usd: float = 0.0) -> list[Tr
                 tx_hash=event_id,
                 ts=ts,
                 source="tonapi",
+                is_launchpad=launchpad,
             ))
     return out
 
@@ -185,6 +193,7 @@ def parse_uranus_events(transactions: list[dict], pool: HotPool, ton_usd: float 
                 tx_hash=tx_hash,
                 ts=ts,
                 source="uranus",
+                is_launchpad=True,            # Uranus is a launchpad DEX — low buy floor applies
             ))
     return out
 

@@ -207,6 +207,35 @@ def test_buy_floor_ton_denominated():
     assert service._buy_floor(s, 0.0) == 300.0     # no TON price -> USD fallback
 
 
+def test_launchpad_buy_floor_ton_denominated():
+    s = _settings(launchpad_buy_alert_ton=20, launchpad_buy_alert_usd=38)
+    assert service._launchpad_buy_floor(s, 4.0) == 80.0    # 20 TON × $4
+    assert service._launchpad_buy_floor(s, 0.0) == 38.0    # no TON price -> USD fallback
+
+
+async def test_launchpad_buy_uses_lower_floor(captured, monkeypatch):
+    # a small whale buy on a launchpad token clears the low launchpad floor; the same size on an
+    # established pool is dropped by the higher regular floor. The whale gate still applies to both.
+    _patch_enrich(monkeypatch, is_whale=True)
+    s = _settings(buy_alert_usd=1000, launchpad_buy_alert_usd=40)
+    lp = _trade(usd=60, trader="0:lp1", token="EQlp1", tx="lp1")
+    lp.is_launchpad = True
+    assert await service.handle_trade(lp, None, None, s) is True
+    assert "WHALE BUY" in captured[0]
+    reg = _trade(usd=60, trader="0:lp2", token="EQlp2", tx="lp2")     # not launchpad -> 1000 floor
+    assert await service.handle_trade(reg, None, None, s) is False
+
+
+async def test_launchpad_non_whale_still_blocked(captured, monkeypatch):
+    # the low floor is not a bypass of the whale gate: a non-whale small launchpad buy still drops
+    _patch_enrich(monkeypatch)                                        # not a whale
+    s = _settings(launchpad_buy_alert_usd=40)
+    lp = _trade(usd=60, trader="0:lp3", token="EQlp3", tx="lp3")
+    lp.is_launchpad = True
+    assert await service.handle_trade(lp, None, None, s) is False
+    assert captured == []
+
+
 async def test_handle_respects_explicit_buy_floor(captured, monkeypatch):
     _patch_enrich(monkeypatch, is_whale=True)      # whale; size floor still applies to whale buys
     below = _trade(usd=350, trader="0:fl1", token="EQfl1", tx="fl1")

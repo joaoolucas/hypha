@@ -130,6 +130,11 @@ class Settings(BaseSettings):
 
     buy_alert_ton: float = 100.0       # min BUY size (TON) — secondary; the primary gate is "is a whale"
     buy_alert_usd: float = 200.0       # fallback BUY floor (USD) when the TON price is unavailable
+    # Launchpad/new tokens (Uranus + fresh launches): whales ape in small 20–30 TON clips, so a much
+    # lower buy floor is needed to surface them. The whale gate still applies; established DEX pools
+    # (DeDust/STON.fi) keep the higher buy_alert_ton floor above.
+    launchpad_buy_alert_ton: float = 20.0   # min BUY size (TON) on launchpad/new tokens
+    launchpad_buy_alert_usd: float = 38.0   # fallback (USD) when the TON price is unavailable
     sell_alert_ton: float = 500.0      # post a SELL at/above this TON size (big dumps)
     sell_alert_usd: float = 950.0      # fallback (USD) when the TON price is unavailable
     whale_portfolio_ton: float = 1000.0     # buyer is a whale 🐋 at/above this TON-valued portfolio
