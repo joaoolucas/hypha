@@ -14,7 +14,7 @@ import time
 
 import structlog
 
-from ..analysis.discovery import hot_pools, is_quote_asset
+from ..analysis.discovery import hot_pools, is_lp_or_staked, is_quote_asset
 from ..analysis.service import analyze_token
 from ..analysis.trades import parse_pool_events, parse_tonapi_events, parse_uranus_events
 from ..bot.channel import render_alert
@@ -62,8 +62,8 @@ async def handle_trade(trade: Trade, tonapi: TonAPI, publisher, s: Settings,
     """Process one detected swap. Returns True if it was posted. `buy_floor_usd` is the effective
     USD buy threshold (TON-denominated, converted at the current TON price); falls back to config."""
     floor = buy_floor_usd if buy_floor_usd is not None else s.buy_alert_usd
-    if not trade.token_address or is_quote_asset(trade.token_symbol):
-        return False                                  # ignore stablecoins + TON/wrapped-TON as the traded token
+    if not trade.token_address or is_quote_asset(trade.token_symbol) or is_lp_or_staked(trade.token_symbol):
+        return False                                  # ignore stables, TON/wrapped-TON, LP and staked tokens
     if not await state.is_new_op(trade, s.alert_dedup_ttl):
         return False
 

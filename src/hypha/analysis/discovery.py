@@ -41,6 +41,17 @@ def is_quote_asset(symbol: str) -> bool:
     return (symbol or "").upper() in _TON_SYMBOLS | _STABLE_SYMBOLS
 
 
+_LP_STAKE_KEYWORDS = ("staked", "stake", "liquidity", "pool")
+
+
+def is_lp_or_staked(symbol: str, name: str = "") -> bool:
+    """LP tokens and staked-token positions — not real memecoin holdings/buys, so excluded."""
+    text = f"{symbol} {name}".lower()
+    if any(k in text for k in _LP_STAKE_KEYWORDS):
+        return True
+    return "lp" in re.split(r"[^a-z0-9]+", text)   # 'LP' as a token, not a substring like 'alpha'
+
+
 def _f(v) -> float:
     try:
         return float(v) if v is not None else 0.0

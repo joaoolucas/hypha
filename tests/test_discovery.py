@@ -1,8 +1,17 @@
 """Token-centric discovery — picking the memecoin side of a pool and dropping non-targets."""
 
 from hypha.analysis.discovery import (
-    dedupe_pools, hot_pools, is_quote_asset, normalize_dexscreener, normalize_pools,
+    dedupe_pools, hot_pools, is_lp_or_staked, is_quote_asset, normalize_dexscreener, normalize_pools,
 )
+
+
+def test_is_lp_or_staked():
+    assert is_lp_or_staked("STON-LP") and is_lp_or_staked("LP")
+    assert is_lp_or_staked("STAKED") and is_lp_or_staked("stTON Staked")
+    assert is_lp_or_staked("X", "STON.fi Liquidity Provider")
+    assert is_lp_or_staked("X", "DeDust Pool: TOKEN/TON")
+    assert not is_lp_or_staked("ALPHA")   # 'lp' substring, not a token
+    assert not is_lp_or_staked("UTYA") and not is_lp_or_staked("STON")
 
 
 def _pool(addr, name, base_id, quote_id, dex="stonfi", reserve="50000", vol="100000"):

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import structlog
 
+from ..analysis.discovery import is_lp_or_staked, is_quote_asset
 from ..config import Settings
 from ..connectors.tonapi import TonAPI
 from ..models import TraderContext
@@ -17,7 +18,6 @@ from . import state
 
 log = structlog.get_logger(__name__)
 
-_STABLE_SYMBOLS = {"USDT", "USD₮", "USDC", "USDE", "JUSDT", "JUSDC", "DAI", "TSUSDE", "USDA"}
 _BURN_RAW = {to_raw(a) for a in BURN_ADDRESSES} | set(BURN_ADDRESSES)
 
 
@@ -53,14 +53,15 @@ async def enrich_trader(trader_raw: str, tonapi: TonAPI, settings: Settings) -> 
     bags: list[dict] = []
     for bal in balances:
         j = bal.get("jetton") or {}
-        sym = j.get("symbol", "")
+        sym, name = j.get("symbol", ""), j.get("name", "")
         try:
             decimals = int(j.get("decimals", 9) or 9)
         except (TypeError, ValueError):
             decimals = 9
         usd = _bag_usd(bal, decimals)
-        portfolio += usd
-        if usd >= 1 and sym.upper() not in _STABLE_SYMBOLS:
+        portfolio += usd                              # whale value counts everything held
+        # but only show real memecoin bags: drop stables/TON/wrapped-TON, LP and staked tokens
+        if usd >= 1 and not is_quote_asset(sym) and not is_lp_or_staked(sym, name):
             bags.append({"symbol": sym, "usd": round(usd, 2)})
 
     # native TON counts toward whale value too (some whales hold mostly TON, not jettons)

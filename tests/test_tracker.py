@@ -128,6 +128,43 @@ async def test_wrapped_ton_token_not_posted(captured, monkeypatch):
     assert captured == []
 
 
+async def test_lp_token_buy_not_posted(captured, monkeypatch):
+    _patch_enrich(monkeypatch, is_whale=True)             # whale, but the token is an LP token
+    tr = _trade(usd=5000, trader="0:lp", token="EQlp", tx="lp")
+    tr.token_symbol = "STON-LP"
+    assert await service.handle_trade(tr, None, None, _settings()) is False
+    assert captured == []
+
+
+class _FakeTon:
+    def __init__(self, balances):
+        self._b = balances
+
+    async def account_jettons(self, addr):
+        return self._b
+
+    async def ton_usd(self):
+        return 5.0
+
+    async def account_ton(self, addr):
+        return 0.0
+
+
+def _bal(symbol, usd, name="", decimals=9):
+    return {"balance": str(int(usd) * 10 ** decimals), "price": {"prices": {"USD": 1.0}},
+            "jetton": {"symbol": symbol, "name": name, "decimals": decimals}}
+
+
+async def test_enrich_excludes_lp_staked_stables_from_holdings():
+    from hypha.tracker.enrich import enrich_trader
+    bals = [_bal("DOGS", 5000), _bal("STON-LP", 9000), _bal("STAKED", 24000),
+            _bal("USDT", 3000), _bal("CAT", 2000)]
+    ctx = await enrich_trader("0:hold", _FakeTon(bals), _settings())
+    syms = [b["symbol"] for b in ctx.top_bags]
+    assert "DOGS" in syms and "CAT" in syms
+    assert "STON-LP" not in syms and "STAKED" not in syms and "USDT" not in syms
+
+
 async def test_non_whale_big_buy_not_posted(captured, monkeypatch):
     # the reported bug: a big buy by a non-whale, non-followed wallet must NOT post
     _patch_enrich(monkeypatch)                              # not a whale, not followed
