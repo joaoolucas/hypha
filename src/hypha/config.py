@@ -152,6 +152,13 @@ class Settings(BaseSettings):
     trade_concurrency: int = 6         # cap concurrent TonAPI pool-event calls
     gecko_min_interval: float = 5.0    # min seconds between GeckoTerminal calls (discovery only now)
 
+    # Daily "Top Whale Buys" digest — a leaderboard recap posted once a day to the channel.
+    digest_enabled: bool = True        # post the daily top-whale-buys leaderboard
+    digest_hour_utc: int = 23          # UTC hour to post the daily recap (covers the UTC day so far)
+    digest_top_n: int = 5              # how many tokens to rank
+    digest_channel_id: str = ""        # where to post the digest (defaults to alerts_channel_id)
+    feed_handle: str = ""              # @handle for the "Full live feed" link (else derived from the channel)
+
     # Wallet-centric follow (Phase 3: auto-promote recurring big buyers, track them everywhere)
     follow_enabled: bool = True        # follow promoted whales into cold (non-trending) tokens
     follow_poll_secs: int = 180        # followed-wallet poll interval (seconds)

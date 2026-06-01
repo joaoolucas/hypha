@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timedelta, timezone
 
 import structlog
 from aiogram import Bot
@@ -17,6 +18,7 @@ from ..config import get_settings
 from ..connectors.geckoterminal import GeckoTerminal
 from ..connectors.tonapi import TonAPI
 from ..db.session import init_models
+from .digest import build_and_post_digest
 from .publisher import BotPublisher
 from .service import discovery_cycle, follow_cycle, trade_cycle
 
@@ -37,6 +39,26 @@ async def _loop(name: str, interval: int, fn) -> None:
         except Exception:  # noqa: BLE001 — never let one bad cycle kill the loop
             log.exception("cycle_failed")
         await asyncio.sleep(interval)
+
+
+def _seconds_until_hour(hour: int) -> float:
+    """Seconds from now until the next occurrence of HH:00 UTC (always strictly in the future)."""
+    now = datetime.now(timezone.utc)
+    target = now.replace(hour=hour % 24, minute=0, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    return (target - now).total_seconds()
+
+
+async def _digest_loop(publisher, s) -> None:
+    """Post the daily 'Top Whale Buys' leaderboard once a day at digest_hour_utc."""
+    log = structlog.get_logger("digest")
+    while True:
+        await asyncio.sleep(_seconds_until_hour(s.digest_hour_utc))
+        try:
+            await build_and_post_digest(publisher, s)
+        except Exception:  # noqa: BLE001 — a failed digest must not kill the loop
+            log.exception("digest_failed")
 
 
 async def main() -> None:
@@ -67,6 +89,8 @@ async def main() -> None:
              _loop("trades", s.trades_poll_secs, lambda: trade_cycle(gecko, tonapi, publisher, s))]
     if s.follow_enabled:
         loops.append(_loop("follow", s.follow_poll_secs, lambda: follow_cycle(gecko, tonapi, publisher, s)))
+    if s.digest_enabled:
+        loops.append(_digest_loop(publisher, s))
 
     try:
         await asyncio.gather(*loops)
