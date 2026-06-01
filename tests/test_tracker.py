@@ -42,6 +42,15 @@ async def test_is_new_op_dedups():
     assert await state.is_new_op(tr, 600) is False        # same op -> suppressed
 
 
+async def test_is_new_op_atomic_under_concurrency():
+    # the duplicate-signal bug: trade + follow loops detect the same swap at once. The claim must be
+    # atomic so exactly one of N concurrent callers wins (a check-then-set would let several post).
+    import asyncio
+    tr = _trade(tx="race-1", trader="0:race", token="EQrace", ts=1000)
+    results = await asyncio.gather(*[state.is_new_op(tr, 600) for _ in range(8)])
+    assert sum(results) == 1
+
+
 async def test_watermark_skips_history_then_yields_fresh():
     pool = "EQwm"
     first = [_trade(ts=100, tx="a"), _trade(ts=200, tx="b")]

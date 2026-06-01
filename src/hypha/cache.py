@@ -73,6 +73,25 @@ async def cache_set(key: str, value: Any, ttl: int) -> None:
     _mem[key] = (time.time() + ttl, payload)
 
 
+async def cache_add(key: str, ttl: int) -> bool:
+    """Atomic claim: set `key` only if absent (Redis SET NX EX). Returns True if we set it (the key
+    was new), False if it already existed. Race-free across concurrent callers — used for dedup so
+    two overlapping loops can't both 'win' the same op. The in-memory fallback is atomic too: the
+    check-and-set runs with no await between, so the cooperative event loop can't interleave it."""
+    r = await _client()
+    if r is not None:
+        try:
+            return bool(await r.set(key, "1", ex=ttl, nx=True))
+        except Exception as exc:  # noqa: BLE001 — fall back to memory
+            log.warning("cache_add_failed", error=str(exc))
+    now = time.time()
+    hit = _mem.get(key)
+    if hit and hit[0] > now:
+        return False
+    _mem[key] = (now + ttl, json.dumps(1))
+    return True
+
+
 async def rate_limit_ok(user_id: int, per_min: int | None = None) -> bool:
     """Sliding-window-ish limiter: <= per_min actions in the last 60s."""
     limit = per_min or get_settings().user_rate_per_min

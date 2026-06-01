@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import time
 
-from ..cache import cache_get, cache_set
+from ..cache import cache_add, cache_get, cache_set
 from ..models import HotPool, Trade
 from ..utils import to_raw
 
@@ -33,17 +33,18 @@ async def load_hot_pools() -> list[HotPool]:
 # ── dedup: don't post the same op twice (across both sources) ──────────────────
 async def is_new_op(trade: Trade, ttl: int) -> bool:
     """True the first time we see an op. Dedups by tx hash (exact, same source) and by a
-    trader+token+side+time-bucket key (collapses the same swap arriving from both sources)."""
+    trader+token+side+time-bucket key (collapses the same swap arriving from both sources).
+
+    Each key is claimed *atomically* (SET NX): the trade/follow loops run concurrently, so a plain
+    check-then-set would let both 'win' the same swap and post it twice. New iff every claim wins."""
     keys = []
     if trade.tx_hash:
         keys.append(f"trk:tx:{trade.tx_hash}")
     bucket = int(trade.ts // 180) if trade.ts else 0
     keys.append(f"trk:op:{trade.trader}:{to_raw(trade.token_address)}:{trade.side.value}:{bucket}")
     for k in keys:
-        if await cache_get(k):
-            return False
-    for k in keys:
-        await cache_set(k, 1, ttl)
+        if not await cache_add(k, ttl):
+            return False                              # someone already claimed this key -> duplicate
     return True
 
 
@@ -132,9 +133,5 @@ async def record_token_whale_buy(token_raw: str, trader_raw: str, usd: float, wi
 
 async def mark_trending(token_raw: str, cooldown: int) -> bool:
     """Claim the trending slot for a token: True once per `cooldown`, then False until it expires.
-    Stops the same token being re-flagged on every subsequent whale buy."""
-    key = f"trk:trended:{token_raw}"
-    if await cache_get(key):
-        return False
-    await cache_set(key, time.time(), cooldown)
-    return True
+    Atomic (SET NX) so concurrent loops can't both post a trending card for the same token."""
+    return await cache_add(f"trk:trended:{token_raw}", cooldown)
