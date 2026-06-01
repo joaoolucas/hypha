@@ -23,6 +23,7 @@ from datetime import datetime, timedelta, timezone
 import structlog
 from sqlalchemy import func, select
 
+from ..analysis.discovery import is_lp_or_staked, is_quote_asset
 from ..config import Settings, get_settings
 from ..db.models import Alert
 from ..db.session import session
@@ -67,7 +68,7 @@ async def top_whale_buys(since: datetime, limit: int) -> list[tuple[str, str, fl
         .where(Alert.side == "buy", Alert.is_whale.is_(True), Alert.created_at >= since)
         .group_by(Alert.token)
         .order_by(total.desc())
-        .limit(limit)
+        .limit(limit * 4)                                  # over-fetch; quote/LST/LP rows dropped below
     )
     try:
         async with db:
@@ -75,7 +76,14 @@ async def top_whale_buys(since: datetime, limit: int) -> list[tuple[str, str, fl
     except Exception as exc:  # noqa: BLE001 — the digest is best-effort; a DB hiccup just skips it
         log.warning("digest_query_failed", error=str(exc))
         return []
-    return [(sym or "", tok, float(tot or 0.0), int(n)) for tok, sym, tot, n in rows]
+    out: list[tuple[str, str, float, int]] = []
+    for tok, sym, tot, n in rows:                          # guard legacy/edge rows: no $TON, $tsTON, LP…
+        if is_quote_asset(sym) or is_lp_or_staked(sym):
+            continue
+        out.append((sym or "", tok, float(tot or 0.0), int(n)))
+        if len(out) >= limit:
+            break
+    return out
 
 
 def render_digest(
