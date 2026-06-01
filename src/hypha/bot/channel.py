@@ -56,6 +56,27 @@ def _venue_html(v: str) -> str:
     return f'<a href="{url}">{name}</a>' if url else name
 
 
+def _market_lines(d) -> list[str]:
+    """The shared market block: price (+24h change) and the MC · Liq · Vol line. [] if no dex data."""
+    if not d:
+        return []
+    price = f"💰 Price {fmt_price(d.price_usd)}"
+    chg = _pct(d.price_change_24h)
+    if chg:
+        arrow = "📉" if (d.price_change_24h or 0) < 0 else "📈"
+        price += f" · {arrow} 24h {chg}"
+    return ["", price,
+            f"🏦 MC {fmt_usd(d.market_cap_usd)} · 💧 Liq {fmt_usd(d.liquidity_usd)} · 📊 Vol {fmt_usd(d.volume24h_usd)}"]
+
+
+def _fmt_window(secs: int) -> str:
+    """'the last hour' / 'the last 2h' / 'the last 30 min' — for the trending headline."""
+    if secs % 3600 == 0:
+        hours = secs // 3600
+        return "the last hour" if hours == 1 else f"the last {hours}h"
+    return f"the last {max(1, secs // 60)} min"
+
+
 def _size(trade: Trade) -> str:
     """'826 TON ($1.6k) · $UTYA' — TON with USD in parens, falling back to USD then bare symbol."""
     sym = f"${_esc(trade.token_symbol or '?')}"
@@ -96,15 +117,7 @@ def render_alert(
     if venue:
         head = f"{head} via {venue}"
     L: list[str] = [head]
-
-    if d:
-        chg = _pct(d.price_change_24h)
-        price = f"💰 Price {fmt_price(d.price_usd)}"
-        if chg:
-            arrow = "📉" if (d.price_change_24h or 0) < 0 else "📈"
-            price += f" · {arrow} 24h {chg}"
-        L += ["", price,
-              f"🏦 MC {fmt_usd(d.market_cap_usd)} · 💧 Liq {fmt_usd(d.liquidity_usd)} · 📊 Vol {fmt_usd(d.volume24h_usd)}"]
+    L += _market_lines(d)
 
     L.append("")
     if ctx.excluded:
@@ -124,5 +137,24 @@ def render_alert(
             L += ["", f'👜 <a href="{hurl}">Holdings:</a>']   # tap-through to the whale's full holdings
             L += holdings
 
+    L += ["", f"🧬 CA: <code>{_esc(addr)}</code>"]
+    return "\n".join(L), _keyboard(addr)
+
+
+def render_trending(
+    report: TokenReport,
+    symbol: str,
+    whales: int,
+    total_usd: float,
+    window_secs: int,
+) -> tuple[str, InlineKeyboardMarkup]:
+    """A 🔥 TRENDING card: N distinct whales bought this token within the window. Reuses the same
+    market block, CA line and trade-bot keyboard as the per-trade alert."""
+    t, d = report.token, report.dex
+    addr = to_friendly(t.address, bounceable=True)
+    sym = f"${_esc(symbol or t.symbol or '?')}"
+    L = [f"🔥🐋 <b>TRENDING · {sym}</b>",
+         f"{whales} whales bought in {_fmt_window(window_secs)} · {fmt_usd(total_usd)} total"]
+    L += _market_lines(d)
     L += ["", f"🧬 CA: <code>{_esc(addr)}</code>"]
     return "\n".join(L), _keyboard(addr)

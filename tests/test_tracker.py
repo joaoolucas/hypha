@@ -2,7 +2,7 @@
 
 import pytest
 
-from hypha.bot.channel import render_alert
+from hypha.bot.channel import render_alert, render_trending
 from hypha.config import Settings
 from hypha.models import (
     DexReport, HyphaScore, TokenInfo, TokenReport, Trade, TraderContext, TradeSide,
@@ -64,6 +64,20 @@ async def test_record_big_buy_counts_in_window():
     assert await state.record_big_buy(w, 604_800) == 1
     assert await state.record_big_buy(w, 604_800) == 2
     assert await state.buy_count(w, 604_800) == 2
+
+
+async def test_record_token_whale_buy_counts_distinct():
+    n, total = await state.record_token_whale_buy("0:tokX", "0:a", 100, 3600)
+    assert n == 1 and total == 100
+    n, total = await state.record_token_whale_buy("0:tokX", "0:a", 150, 3600)   # same trader again
+    assert n == 1 and total == 150                                              # still 1, latest usd
+    n, total = await state.record_token_whale_buy("0:tokX", "0:b", 50, 3600)
+    assert n == 2 and total == 200                                             # 150 (a) + 50 (b)
+
+
+async def test_mark_trending_cooldown():
+    assert await state.mark_trending("0:tokY", 3600) is True
+    assert await state.mark_trending("0:tokY", 3600) is False                  # claimed -> on cooldown
 
 
 # ── posting-policy funnel ────────────────────────────────────────────────────────
@@ -220,6 +234,35 @@ async def test_followed_sell_still_posts(captured, monkeypatch):
     _patch_enrich(monkeypatch, is_followed=True)                   # followed, not whale
     tr = _trade(side=TradeSide.SELL, usd=12000, trader="0:fsell", token="EQfs", tx="fs")
     assert await service.handle_trade(tr, None, None, _settings()) is True
+
+
+async def test_trending_fires_after_enough_distinct_whales(captured, monkeypatch):
+    _patch_enrich(monkeypatch, is_whale=True)
+    s = _settings(trending_min_whales=5, trending_window_secs=3600, trending_cooldown_secs=3600)
+    for i in range(5):                                             # 5 distinct whales, same token
+        tr = _trade(usd=2000, trader=f"0:tw{i}", token="EQtrend", tx=f"tw{i}")
+        await service.handle_trade(tr, None, None, s)
+    trending = [p for p in captured if "TRENDING" in p]
+    assert len(trending) == 1                                     # fires once, on the 5th whale
+    assert "5 whales bought in the last hour" in trending[0]
+    assert "$TRENDING" not in trending[0]                         # symbol comes from the trade (SHROOM)
+
+
+async def test_trending_needs_distinct_not_repeat_buyers(captured, monkeypatch):
+    _patch_enrich(monkeypatch, is_whale=True)
+    s = _settings(trending_min_whales=5, trending_window_secs=3600)
+    for i in range(6):                                            # one whale buying 6 times != trending
+        tr = _trade(usd=2000, trader="0:same", token="EQrepeat", tx=f"rp{i}")
+        await service.handle_trade(tr, None, None, s)
+    assert [p for p in captured if "TRENDING" in p] == []
+
+
+def test_render_trending_format():
+    report = _report(symbol="SIGNETRING", mcap=5_500)
+    html, kb = render_trending(report, "SIGNETRING", 5, 2_400, 3600)
+    assert "🔥🐋 <b>TRENDING · $SIGNETRING</b>" in html
+    assert "5 whales bought in the last hour · $2.4k total" in html
+    assert "🧬 CA:" in html and kb is not None
 
 
 def test_buy_floor_ton_denominated():

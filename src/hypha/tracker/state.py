@@ -115,3 +115,26 @@ async def buy_count(wallet_raw: str, window: int) -> int:
     now = time.time()
     arr = [x for x in (await cache_get(f"trk:buys:{wallet_raw}") or []) if now - x <= window]
     return len(arr)
+
+
+# ── trending: distinct whale buyers of a token within a rolling window ──────────
+async def record_token_whale_buy(token_raw: str, trader_raw: str, usd: float, window: int) -> tuple[int, float]:
+    """Record a whale buy of `token` and return (distinct whales, total USD) within the window.
+    One entry per trader (latest buy wins), so the count is distinct wallets, not raw buys."""
+    key = f"trk:trend:{token_raw}"
+    now = time.time()
+    arr = [x for x in (await cache_get(key) or [])
+           if now - x.get("ts", 0) <= window and x.get("trader") != trader_raw]
+    arr.append({"trader": trader_raw, "ts": now, "usd": round(usd, 2)})
+    await cache_set(key, arr[-100:], window)
+    return len(arr), round(sum(x.get("usd", 0.0) for x in arr), 2)
+
+
+async def mark_trending(token_raw: str, cooldown: int) -> bool:
+    """Claim the trending slot for a token: True once per `cooldown`, then False until it expires.
+    Stops the same token being re-flagged on every subsequent whale buy."""
+    key = f"trk:trended:{token_raw}"
+    if await cache_get(key):
+        return False
+    await cache_set(key, time.time(), cooldown)
+    return True

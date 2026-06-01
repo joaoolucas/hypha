@@ -17,7 +17,7 @@ import structlog
 from ..analysis.discovery import hot_pools, is_lp_or_staked, is_quote_asset, is_unknown_symbol
 from ..analysis.service import analyze_token
 from ..analysis.trades import parse_pool_events, parse_tonapi_events, parse_uranus_events
-from ..bot.channel import render_alert
+from ..bot.channel import render_alert, render_trending
 from ..config import Settings
 from ..connectors.dexscreener import DexScreener
 from ..connectors.geckoterminal import GeckoTerminal
@@ -25,6 +25,7 @@ from ..connectors.tonapi import TonAPI
 from ..db.models import Alert
 from ..db.session import session
 from ..models import Trade, TradeSide
+from ..utils import to_raw
 from . import state
 from .enrich import enrich_trader
 
@@ -105,7 +106,25 @@ async def handle_trade(trade: Trade, tonapi: TonAPI, publisher, s: Settings,
     posted = await publish_alert(publisher, s.alerts_channel_id, text, keyboard)
     if posted:
         await _log_alert(trade, ctx, report)
+        if trade.side == TradeSide.BUY and ctx.is_whale and s.trending_enabled:
+            await _maybe_post_trending(trade, report, publisher, s)
     return posted
+
+
+async def _maybe_post_trending(trade: Trade, report, publisher, s: Settings) -> None:
+    """After a whale buy posts, tally distinct whales buying this token in the window. Once it
+    crosses the threshold, post a single 🔥 TRENDING card (rate-limited per token by a cooldown)."""
+    token_raw = to_raw(trade.token_address)
+    whales, total_usd = await state.record_token_whale_buy(
+        token_raw, trade.trader, trade.usd, s.trending_window_secs)
+    if whales < s.trending_min_whales:
+        return
+    if not await state.mark_trending(token_raw, s.trending_cooldown_secs):
+        return                                        # already flagged recently — don't repeat
+    text, keyboard = render_trending(report, trade.token_symbol, whales, total_usd, s.trending_window_secs)
+    if await publish_alert(publisher, s.alerts_channel_id, text, keyboard):
+        log.info("trending_posted", token=trade.token_address, symbol=trade.token_symbol,
+                 whales=whales, total_usd=round(total_usd))
 
 
 async def _log_alert(trade: Trade, ctx, report) -> None:

@@ -152,6 +152,12 @@ class Settings(BaseSettings):
     trade_concurrency: int = 6         # cap concurrent TonAPI pool-event calls
     gecko_min_interval: float = 5.0    # min seconds between GeckoTerminal calls (discovery only now)
 
+    # "Trending" alerts — flag a token when several distinct whales buy it in a short window.
+    trending_enabled: bool = True      # post a 🔥 TRENDING card when a token heats up
+    trending_min_whales: int = 5       # distinct whale buyers within the window to trigger
+    trending_window_secs: int = 3600   # rolling window for counting distinct whale buyers (1h)
+    trending_cooldown_secs: int = 21_600  # don't re-flag the same token within this window (6h)
+
     # Daily "Top Whale Buys" digest — a leaderboard recap posted once a day to the channel.
     digest_enabled: bool = True        # post the daily top-whale-buys leaderboard
     digest_hour_utc: int = 23          # UTC hour to post the daily recap (covers the UTC day so far)
