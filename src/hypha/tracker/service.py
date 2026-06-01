@@ -14,7 +14,7 @@ import time
 
 import structlog
 
-from ..analysis.discovery import hot_pools, is_lp_or_staked, is_quote_asset
+from ..analysis.discovery import hot_pools, is_lp_or_staked, is_quote_asset, is_unknown_symbol
 from ..analysis.service import analyze_token
 from ..analysis.trades import parse_pool_events, parse_tonapi_events, parse_uranus_events
 from ..bot.channel import render_alert
@@ -74,6 +74,13 @@ async def handle_trade(trade: Trade, tonapi: TonAPI, publisher, s: Settings,
         return False
 
     report = await analyze_token(trade.token_address)
+    # DexScreener stamps brand-new launchpad pairs 'UNKWN' until indexed; fall back to the on-chain
+    # ticker we already fetched (UNKWN -> SIGNETRING). Drop only if even on-chain metadata is nameless.
+    if is_unknown_symbol(trade.token_symbol):
+        onchain = (report.token.symbol if report.token else "") or ""
+        if is_unknown_symbol(onchain) or is_quote_asset(onchain) or is_lp_or_staked(onchain):
+            return False
+        trade.token_symbol = onchain
     mcap = report.dex.market_cap_usd if report.dex else None
     if mcap and mcap > s.max_mcap_usd:                # small-cap focus; skip big tokens (holdings unaffected)
         return False

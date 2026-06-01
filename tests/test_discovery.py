@@ -1,8 +1,15 @@
 """Token-centric discovery — picking the memecoin side of a pool and dropping non-targets."""
 
 from hypha.analysis.discovery import (
-    dedupe_pools, hot_pools, is_lp_or_staked, is_quote_asset, normalize_dexscreener, normalize_pools,
+    dedupe_pools, hot_pools, is_lp_or_staked, is_quote_asset, is_unknown_symbol,
+    normalize_dexscreener, normalize_pools,
 )
+
+
+def test_is_unknown_symbol():
+    assert is_unknown_symbol("UNKWN") and is_unknown_symbol("unknown")
+    assert is_unknown_symbol("") and is_unknown_symbol(" ? ") and is_unknown_symbol(None)
+    assert not is_unknown_symbol("SIGNETRING") and not is_unknown_symbol("UTYA")
 
 
 def test_is_lp_or_staked():

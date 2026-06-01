@@ -23,7 +23,7 @@ from datetime import datetime, timedelta, timezone
 import structlog
 from sqlalchemy import func, select
 
-from ..analysis.discovery import is_lp_or_staked, is_quote_asset
+from ..analysis.discovery import is_lp_or_staked, is_quote_asset, is_unknown_symbol
 from ..config import Settings, get_settings
 from ..db.models import Alert
 from ..db.session import session
@@ -77,8 +77,8 @@ async def top_whale_buys(since: datetime, limit: int) -> list[tuple[str, str, fl
         log.warning("digest_query_failed", error=str(exc))
         return []
     out: list[tuple[str, str, float, int]] = []
-    for tok, sym, tot, n in rows:                          # guard legacy/edge rows: no $TON, $tsTON, LP…
-        if is_quote_asset(sym) or is_lp_or_staked(sym):
+    for tok, sym, tot, n in rows:                          # guard legacy/edge rows: no $TON, $tsTON, LP, UNKWN…
+        if is_quote_asset(sym) or is_lp_or_staked(sym) or is_unknown_symbol(sym):
             continue
         out.append((sym or "", tok, float(tot or 0.0), int(n)))
         if len(out) >= limit:

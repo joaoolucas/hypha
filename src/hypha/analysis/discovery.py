@@ -41,6 +41,16 @@ def is_quote_asset(symbol: str) -> bool:
     return (symbol or "").upper() in _TON_SYMBOLS | _STABLE_SYMBOLS
 
 
+# Placeholder tickers — DexScreener stamps fresh launchpad pairs 'UNKWN'/'Unknown' until it
+# indexes them; we resolve those to the on-chain symbol instead of showing the placeholder.
+_UNKNOWN_SYMBOLS = {"", "?", "UNKWN", "UNKNOWN", "TOKEN", "N/A", "NA", "NONE", "NULL"}
+
+
+def is_unknown_symbol(symbol: str) -> bool:
+    """True for an unresolved/placeholder ticker (no real name to display)."""
+    return (symbol or "").strip().upper() in _UNKNOWN_SYMBOLS
+
+
 _LP_STAKE_KEYWORDS = ("staked", "stake", "liquidity", "pool")
 
 

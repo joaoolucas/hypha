@@ -96,6 +96,27 @@ async def test_big_buy_posts(captured, monkeypatch):
     assert "WHALE BUY" in captured[0]
 
 
+async def test_unknown_symbol_resolved_from_onchain(captured, monkeypatch):
+    # DexScreener placeholder 'UNKWN' is replaced by the on-chain ticker (here _report -> SHROOM)
+    _patch_enrich(monkeypatch, is_whale=True, portfolio_usd=180_000)
+    tr = _trade(usd=4200, trader="0:uk1", token="EQuk1", tx="uk1")
+    tr.token_symbol = "UNKWN"
+    assert await service.handle_trade(tr, None, None, _settings()) is True
+    assert "$SHROOM" in captured[0] and "UNKWN" not in captured[0]
+    assert tr.token_symbol == "SHROOM"
+
+
+async def test_unknown_symbol_dropped_when_onchain_also_unknown(captured, monkeypatch):
+    async def junk_analyze(addr, **kw):
+        return _report(symbol="?")                         # on-chain metadata is nameless too
+    monkeypatch.setattr(service, "analyze_token", junk_analyze)
+    _patch_enrich(monkeypatch, is_whale=True)
+    tr = _trade(usd=4200, trader="0:uk2", token="EQuk2", tx="uk2")
+    tr.token_symbol = "UNKWN"
+    assert await service.handle_trade(tr, None, None, _settings()) is False
+    assert captured == []
+
+
 async def test_small_buy_not_posted(captured, monkeypatch):
     _patch_enrich(monkeypatch, is_whale=True)              # whale, but below the size floor
     tr = _trade(usd=500, trader="0:b2", token="EQb2", tx="b2")
