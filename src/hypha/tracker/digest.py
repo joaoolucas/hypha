@@ -1,13 +1,19 @@
-"""Daily "Top Whale Buys" digest — a leaderboard recap posted to the channel.
+"""Daily whale digest — a leaderboard recap posted to the channel.
 
-Aggregates the whale BUY alerts logged for the day (the `alerts` table) by token, ranks the top N
-by total USD bought, and posts a compact leaderboard that links back to the live feed. Reads the
-alert log, so it needs DATABASE_URL; with no DB (or no data) it logs and no-ops.
+Aggregates the day's whale BUY and SELL alerts (the `alerts` table) by token, ranks the top N of
+each by total USD, and posts a compact two-section leaderboard. Each token links to its DexScreener
+page (chart + live transactions). Reads the alert log, so it needs DATABASE_URL; with no DB (or no
+data) it logs and no-ops.
 
-  🐋 Top TON Meme Whale Buys Today
+  🟢🐋 Top TON Meme Whale Buys Today
 
   1. $UTYA — $12.4k
   2. $FLOWGAIA — $8.1k
+  ...
+
+  🔴🐋 Top TON Meme Whale Sells Today
+
+  1. $DUSTGANG — $4.2k
   ...
 
   Full live feed: @WhaleSignalsTON
@@ -19,6 +25,7 @@ import asyncio
 import html
 import os
 from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
 
 import structlog
 from sqlalchemy import func, select
@@ -55,9 +62,9 @@ def _feed_handle(s: Settings) -> str:
     return cid.lstrip("@") if cid.startswith("@") else ""
 
 
-async def top_whale_buys(since: datetime, limit: int) -> list[tuple[str, str, float, int]]:
-    """[(symbol, token, total_usd, buys)] — whale buys since `since`, grouped by token, biggest first.
-    The label is the best non-empty symbol seen for that token (falling back to '' for the address)."""
+async def top_whale_trades(since: datetime, limit: int, side: str = "buy") -> list[tuple[str, str, float, int]]:
+    """[(symbol, token, total_usd, trades)] — whale `side` trades since `since`, grouped by token,
+    biggest first. The label is the best non-empty symbol seen for that token."""
     db = session()
     if db is None:
         return []
@@ -65,7 +72,7 @@ async def top_whale_buys(since: datetime, limit: int) -> list[tuple[str, str, fl
     total = func.sum(Alert.usd)
     stmt = (
         select(Alert.token, label, total, func.count(Alert.id))
-        .where(Alert.side == "buy", Alert.is_whale.is_(True), Alert.created_at >= since)
+        .where(Alert.side == side, Alert.is_whale.is_(True), Alert.created_at >= since)
         .group_by(Alert.token)
         .order_by(total.desc())
         .limit(limit * 4)                                  # over-fetch; quote/LST/LP rows dropped below
@@ -86,33 +93,47 @@ async def top_whale_buys(since: datetime, limit: int) -> list[tuple[str, str, fl
     return out
 
 
-def render_digest(
-    rows: list[tuple[str, str, float, int]],
-    feed_handle: str,
-    *,
-    title: str = "🐋 Top TON Meme Whale Buys Today",
-) -> str:
+def _rank_lines(rows: list[tuple[str, str, float, int]]) -> list[str]:
+    """Numbered leaderboard lines; each token links to its DexScreener page (chart + transactions)."""
     from ..utils import fmt_usd   # local import keeps this module import-light for the CLI path
 
-    lines = [f"<b>{title}</b>", ""]
-    for i, (sym, tok, total_usd, _buys) in enumerate(rows, 1):
-        name = f"${_esc(sym)}" if sym else f"<code>{_esc(_short(tok))}</code>"
-        lines.append(f"{i}. {name} — {fmt_usd(total_usd)}")
+    out: list[str] = []
+    for i, (sym, tok, total_usd, _n) in enumerate(rows, 1):
+        name = f"${_esc(sym)}" if sym else _esc(_short(tok))
+        url = f"https://dexscreener.com/ton/{quote(tok, safe='')}"
+        out.append(f'{i}. <a href="{url}">{name}</a> — {fmt_usd(total_usd)}')
+    return out
+
+
+def render_digest(
+    buys: list[tuple[str, str, float, int]],
+    sells: list[tuple[str, str, float, int]],
+    feed_handle: str,
+) -> str:
+    lines: list[str] = []
+    if buys:
+        lines += ["<b>🟢🐋 Top TON Meme Whale Buys Today</b>", "", *_rank_lines(buys)]
+    if sells:
+        if lines:
+            lines.append("")
+        lines += ["<b>🔴🐋 Top TON Meme Whale Sells Today</b>", "", *_rank_lines(sells)]
     if feed_handle:
         lines += ["", f'Full live feed: <a href="https://t.me/{_esc(feed_handle)}">@{_esc(feed_handle)}</a>']
     return "\n".join(lines)
 
 
 async def build_and_post_digest(publisher, s: Settings, *, window_hours: int | None = None) -> bool:
-    """Build today's leaderboard and post it. No-ops (logs) when there's nothing to rank."""
-    rows = await top_whale_buys(_since(window_hours), s.digest_top_n)
-    if not rows:
+    """Build today's buy/sell leaderboards and post them. No-ops (logs) when there's nothing to rank."""
+    since = _since(window_hours)
+    buys = await top_whale_trades(since, s.digest_top_n, "buy")
+    sells = await top_whale_trades(since, s.digest_top_n, "sell")
+    if not buys and not sells:
         log.info("digest_skip_empty")
         return False
     channel = s.digest_channel_id or s.alerts_channel_id
-    html_body = render_digest(rows, _feed_handle(s))
+    html_body = render_digest(buys, sells, _feed_handle(s))
     ok = await publisher.publish(channel, html_body, None)
-    log.info("digest_posted", tokens=len(rows), ok=ok)
+    log.info("digest_posted", buys=len(buys), sells=len(sells), ok=ok)
     return ok
 
 
